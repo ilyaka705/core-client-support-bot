@@ -10,6 +10,10 @@ const commandData = [
     .setDescription('Post the community rules panel in this channel.')
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('suggestionpanel')
+    .setDescription('Post the suggestion panel in this channel.')
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
     .setName('set-ticket-category')
     .setDescription('Choose where new tickets are created.')
     .addChannelOption((option) => option
@@ -53,6 +57,15 @@ const commandData = [
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('set-suggestion-channel')
+    .setDescription('Choose where member suggestions are posted.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Suggestion channel (leave empty to use the panel channel)')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
     .setName('set-log-channel')
     .setDescription('Choose where general bot activity is saved.')
     .addChannelOption((option) => option
@@ -67,6 +80,19 @@ const commandData = [
     .addChannelOption((option) => option
       .setName('channel')
       .setDescription('Ticket log channel (leave empty to disable)')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('applicationpanel')
+    .setDescription('Post the private application panel in this channel.')
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-application-review-channel')
+    .setDescription('Choose the private channel where applications are reviewed.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Private staff channel (leave empty to disable applications)')
       .addChannelTypes(ChannelType.GuildText)
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
@@ -89,6 +115,36 @@ const commandData = [
       .setMaxValue(100)
       .setRequired(true))
     .setDefaultMemberPermissions(0x2000n),
+  new SlashCommandBuilder()
+    .setName('giveaway')
+    .setDescription('Start a giveaway in this channel.')
+    .addStringOption((option) => option
+      .setName('prize')
+      .setDescription('What can members win?')
+      .setRequired(true))
+    .addIntegerOption((option) => option
+      .setName('duration')
+      .setDescription('Duration in minutes')
+      .setMinValue(1)
+      .setMaxValue(43200)
+      .setRequired(true))
+    .addIntegerOption((option) => option
+      .setName('winners')
+      .setDescription('Number of winners (default: 1)')
+      .setMinValue(1)
+      .setMaxValue(10)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('poll')
+    .setDescription('Post a poll in this channel.')
+    .addStringOption((option) => option.setName('question').setDescription('Poll question').setRequired(true))
+    .addStringOption((option) => option.setName('option1').setDescription('First option').setRequired(true))
+    .addStringOption((option) => option.setName('option2').setDescription('Second option').setRequired(true))
+    .addStringOption((option) => option.setName('option3').setDescription('Third option').setRequired(false))
+    .addStringOption((option) => option.setName('option4').setDescription('Fourth option').setRequired(false))
+    .addStringOption((option) => option.setName('option5').setDescription('Fifth option').setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
 ].map((command) => command.toJSON());
 
 module.exports = { commandData };

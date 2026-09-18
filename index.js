@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomInt } = require('node:crypto');
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -50,6 +51,12 @@ settings.autoRoleIds ??= {};
 settings.logChannelIds ??= {};
 settings.ticketLogChannelIds ??= {};
 settings.rolePanels ??= {};
+settings.suggestionChannelIds ??= {};
+settings.suggestions ??= {};
+settings.giveaways ??= {};
+settings.polls ??= {};
+settings.applicationReviewChannelIds ??= {};
+settings.applications ??= {};
 
 const ticketTypes = {
   general: 'General support',
@@ -232,6 +239,203 @@ function rulesPanelEmbeds() {
       )
       .setFooter({ text: 'Thank you for helping us keep CORE. client safe.' }),
   ];
+}
+
+function suggestionStatusLabel(status) {
+  return ({ pending: 'Pending review', review: 'Under review', accepted: 'Accepted', declined: 'Declined' })[status] || 'Pending review';
+}
+
+function suggestionPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle('Share an idea')
+    .setDescription('Have an idea that could make CORE. client better? Send it to the team. Every suggestion is reviewed privately by staff.')
+    .addFields(
+      { name: '01  Keep it clear', value: 'Describe the idea and why it would help.' },
+      { name: '02  Be constructive', value: 'Helpful feedback gives us the best chance to improve.' },
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'CORE. client  •  Suggestions' });
+}
+
+function suggestionActions(status = 'pending') {
+  const isFinal = ['accepted', 'declined'].includes(status);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('suggestion_status:review').setLabel('Under Review').setStyle(ButtonStyle.Primary).setDisabled(isFinal || status === 'review'),
+    new ButtonBuilder().setCustomId('suggestion_status:accepted').setLabel('Accept').setStyle(ButtonStyle.Success).setDisabled(isFinal),
+    new ButtonBuilder().setCustomId('suggestion_status:declined').setLabel('Decline').setStyle(ButtonStyle.Danger).setDisabled(isFinal),
+  );
+}
+
+function suggestionEmbed(suggestion) {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: `Suggestion from ${suggestion.authorName}`, iconURL: suggestion.authorAvatar })
+    .setTitle(suggestion.title.slice(0, 256))
+    .setDescription(suggestion.details.slice(0, 4096))
+    .addFields({ name: 'Status', value: suggestionStatusLabel(suggestion.status), inline: true })
+    .setFooter({ text: 'CORE. client  •  Suggestions' })
+    .setTimestamp(suggestion.createdAt);
+}
+
+function suggestionForm() {
+  const title = new TextInputBuilder()
+    .setCustomId('title')
+    .setLabel('What is your idea?')
+    .setPlaceholder('For example: Add a community event channel')
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(100)
+    .setRequired(true);
+  const details = new TextInputBuilder()
+    .setCustomId('details')
+    .setLabel('Tell us why this would help')
+    .setPlaceholder('Explain the idea in a little more detail...')
+    .setStyle(TextInputStyle.Paragraph)
+    .setMaxLength(1000)
+    .setRequired(true);
+  return new ModalBuilder()
+    .setCustomId('suggestion_submit')
+    .setTitle('New suggestion')
+    .addComponents(new ActionRowBuilder().addComponents(title), new ActionRowBuilder().addComponents(details));
+}
+
+function giveawayEmbed(giveaway) {
+  const ended = Boolean(giveaway.ended);
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle(ended ? 'Giveaway ended' : 'Giveaway')
+    .setDescription(ended
+      ? `**Prize**\n${giveaway.prize}\n\nThe winners have been announced below.`
+      : `**Prize**\n${giveaway.prize}\n\nPress **Enter Giveaway** below to take part.\nEnds <t:${Math.floor(giveaway.endsAt / 1000)}:R>.`)
+    .addFields(
+      { name: 'Entries', value: String(giveaway.entries.length), inline: true },
+      { name: 'Winners', value: String(giveaway.winnerCount), inline: true },
+      { name: 'Hosted by', value: giveaway.hostName, inline: true },
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: ended ? 'CORE. client  •  Giveaway complete' : 'CORE. client  •  Good luck' });
+}
+
+function giveawayActions(ended = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('giveaway_enter').setLabel(ended ? 'Giveaway ended' : 'Enter Giveaway').setStyle(ButtonStyle.Primary).setDisabled(ended),
+  );
+}
+
+function chooseGiveawayWinners(entries, count) {
+  const pool = [...entries];
+  const winners = [];
+  while (pool.length && winners.length < count) winners.push(pool.splice(randomInt(pool.length), 1)[0]);
+  return winners;
+}
+
+async function finishGiveaway(messageId, giveaway) {
+  if (giveaway.ended) return;
+  giveaway.ended = true;
+  giveaway.endedAt = Date.now();
+  giveaway.winnerIds = chooseGiveawayWinners(giveaway.entries, giveaway.winnerCount);
+  saveSettings();
+
+  const guild = client.guilds.cache.get(giveaway.guildId);
+  const channel = guild ? await guild.channels.fetch(giveaway.channelId).catch(() => null) : null;
+  if (!channel?.isTextBased()) return;
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (message) await message.edit({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions(true)] }).catch(() => {});
+
+  const result = giveaway.winnerIds.length
+    ? `Congratulations ${giveaway.winnerIds.map((id) => `<@${id}>`).join(', ')} — you won **${giveaway.prize}**!`
+    : `The giveaway for **${giveaway.prize}** ended with no entries.`;
+  await channel.send({ content: result, allowedMentions: { parse: [], users: giveaway.winnerIds } }).catch(() => {});
+  await sendLog(guild, 'Giveaway ended', `Prize: **${giveaway.prize}**\nEntries: **${giveaway.entries.length}**`).catch(() => {});
+}
+
+async function finishDueGiveaways() {
+  const now = Date.now();
+  for (const [messageId, giveaway] of Object.entries(settings.giveaways)) {
+    if (!giveaway.ended && giveaway.endsAt <= now) await finishGiveaway(messageId, giveaway).catch((error) => console.error('Giveaway:', error.message));
+  }
+}
+
+function pollEmbed(poll) {
+  const votes = Object.values(poll.votes);
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle('Poll')
+    .setDescription(`**${poll.question}**\n\nChoose one option below. You can change your vote at any time.`)
+    .addFields(poll.options.map((option, index) => ({
+      name: `${index + 1}. ${option}`.slice(0, 256),
+      value: `**${votes.filter((vote) => vote === index).length}** vote(s)`,
+      inline: false,
+    })))
+    .setFooter({ text: `${votes.length} total vote(s)  •  CORE. client` });
+}
+
+function pollActions(poll) {
+  return new ActionRowBuilder().addComponents(poll.options.map((option, index) => new ButtonBuilder()
+    .setCustomId(`poll_vote:${index}`)
+    .setLabel(option.slice(0, 80))
+    .setStyle(ButtonStyle.Secondary)));
+}
+
+function applicationStatusLabel(status) {
+  return ({ pending: 'Pending review', claimed: 'Claimed by staff', accepted: 'Accepted', declined: 'Declined' })[status] || 'Pending review';
+}
+
+function applicationPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle('Applications')
+    .setDescription('Interested in joining or working with CORE. client? Send a private application to our team.')
+    .addFields(
+      { name: 'Private by default', value: 'Your answers are sent only to the staff review channel.' },
+      { name: 'Take your time', value: 'Give clear and honest answers so the team can review your application fairly.' },
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'CORE. client  •  Applications' });
+}
+
+function applicationActions(status = 'pending') {
+  const isFinal = ['accepted', 'declined'].includes(status);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('application_status:claimed').setLabel('Claim').setStyle(ButtonStyle.Primary).setDisabled(isFinal || status === 'claimed'),
+    new ButtonBuilder().setCustomId('application_status:accepted').setLabel('Accept').setStyle(ButtonStyle.Success).setDisabled(isFinal),
+    new ButtonBuilder().setCustomId('application_status:declined').setLabel('Decline').setStyle(ButtonStyle.Danger).setDisabled(isFinal),
+  );
+}
+
+function applicationEmbed(application) {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: `Application from ${application.authorName}`, iconURL: application.authorAvatar })
+    .setTitle(application.position.slice(0, 256))
+    .addFields(
+      { name: 'Experience', value: application.experience.slice(0, 1024) },
+      { name: 'Availability', value: application.availability.slice(0, 1024) },
+      { name: 'Why should we choose you?', value: application.reason.slice(0, 1024) },
+      { name: 'Status', value: applicationStatusLabel(application.status), inline: true },
+    )
+    .setFooter({ text: application.staffName ? `Reviewed by ${application.staffName}  •  CORE. client` : 'CORE. client  •  Applications' })
+    .setTimestamp(application.createdAt);
+}
+
+function applicationForm() {
+  const position = new TextInputBuilder().setCustomId('position').setLabel('What are you applying for?').setPlaceholder('For example: Staff member or partnership').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(true);
+  const experience = new TextInputBuilder().setCustomId('experience').setLabel('Relevant experience').setPlaceholder('Tell us about relevant skills or experience...').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true);
+  const availability = new TextInputBuilder().setCustomId('availability').setLabel('Your availability and timezone').setPlaceholder('For example: CET, available evenings and weekends').setStyle(TextInputStyle.Short).setMaxLength(200).setRequired(true);
+  const reason = new TextInputBuilder().setCustomId('reason').setLabel('Why should we choose you?').setPlaceholder('Tell us why you would be a good fit...').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(true);
+  return new ModalBuilder()
+    .setCustomId('application_submit')
+    .setTitle('New application')
+    .addComponents(
+      new ActionRowBuilder().addComponents(position),
+      new ActionRowBuilder().addComponents(experience),
+      new ActionRowBuilder().addComponents(availability),
+      new ActionRowBuilder().addComponents(reason),
+    );
 }
 
 const openRow = new ActionRowBuilder().addComponents(
@@ -451,6 +655,8 @@ client.once(Events.ClientReady, async (readyClient) => {
   }
   await checkTikTokFeeds();
   setInterval(checkTikTokFeeds, 5 * 60 * 1000).unref();
+  await finishDueGiveaways();
+  setInterval(() => finishDueGiveaways().catch((error) => console.error('Giveaway check:', error.message)), 30 * 1000).unref();
   console.log(`Logged in as ${readyClient.user.tag}`);
 });
 
@@ -534,6 +740,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const managementCommands = new Set([
         'ticketpaneel',
         'rulepanel',
+        'suggestionpanel',
+        'set-suggestion-channel',
         'set-ticket-category',
         'set-tiktok-feed',
         'remove-tiktok-feed',
@@ -541,7 +749,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-auto-role',
         'set-log-channel',
         'set-ticket-log-channel',
+        'applicationpanel',
+        'set-application-review-channel',
         'rolepanel',
+        'giveaway',
+        'poll',
       ]);
       if (managementCommands.has(interaction.commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -553,6 +765,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.commandName === 'rulepanel') {
         await interaction.channel.send({ embeds: rulesPanelEmbeds(), allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'suggestionpanel') {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('suggestion_open').setLabel('Submit a Suggestion').setStyle(ButtonStyle.Primary),
+        );
+        await interaction.channel.send({ embeds: [suggestionPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Suggestion panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'set-ticket-category') {
         const category = interaction.options.getChannel('category');
@@ -606,6 +825,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Automatic role assignment has been disabled.', ephemeral: true });
         }
       }
+      if (interaction.commandName === 'set-suggestion-channel') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          settings.suggestionChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `New suggestions will now be posted in ${channel}.`, ephemeral: true });
+        } else {
+          delete settings.suggestionChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Suggestions will now be posted in the suggestion panel channel.', ephemeral: true });
+        }
+      }
       if (interaction.commandName === 'set-log-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
@@ -630,6 +861,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Ticket activity logs and transcripts have been disabled.', ephemeral: true });
         }
       }
+      if (interaction.commandName === 'set-application-review-channel') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          settings.applicationReviewChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `Applications will now be sent privately to ${channel}.`, ephemeral: true });
+        } else {
+          delete settings.applicationReviewChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Applications have been disabled.', ephemeral: true });
+        }
+      }
+      if (interaction.commandName === 'applicationpanel') {
+        if (!settings.applicationReviewChannelIds[interaction.guild.id]) {
+          return interaction.reply({ content: 'Set a private application review channel first with /set-application-review-channel.', ephemeral: true });
+        }
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('application_open').setLabel('Start Application').setStyle(ButtonStyle.Primary),
+        );
+        await interaction.channel.send({ embeds: [applicationPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Application panel posted.', ephemeral: true });
+      }
       if (interaction.commandName === 'rolepanel') {
         const roles = [...new Map(['role1', 'role2', 'role3', 'role4', 'role5']
           .map((name) => interaction.options.getRole(name))
@@ -644,10 +897,118 @@ client.on(Events.InteractionCreate, async (interaction) => {
         saveSettings();
         await interaction.reply({ content: 'Role panel posted.', ephemeral: true });
       }
+      if (interaction.commandName === 'giveaway') {
+        if (!interaction.channel?.isTextBased()) return interaction.reply({ content: 'Giveaways can only be posted in a text channel.', ephemeral: true });
+        const giveaway = {
+          guildId: interaction.guild.id,
+          channelId: interaction.channel.id,
+          prize: interaction.options.getString('prize', true).trim().slice(0, 1000),
+          endsAt: Date.now() + (interaction.options.getInteger('duration', true) * 60 * 1000),
+          winnerCount: interaction.options.getInteger('winners') || 1,
+          hostName: interaction.user.username,
+          entries: [],
+          ended: false,
+        };
+        const message = await interaction.channel.send({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()], allowedMentions: { parse: [] } });
+        settings.giveaways[message.id] = giveaway;
+        saveSettings();
+        await sendLog(interaction.guild, 'Giveaway started', `Prize: **${giveaway.prize}**\nHosted by: **${interaction.user.username}**`).catch(() => {});
+        await interaction.reply({ content: 'Giveaway posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'poll') {
+        if (!interaction.channel?.isTextBased()) return interaction.reply({ content: 'Polls can only be posted in a text channel.', ephemeral: true });
+        const options = ['option1', 'option2', 'option3', 'option4', 'option5']
+          .map((name) => interaction.options.getString(name))
+          .filter(Boolean)
+          .map((option) => option.trim().slice(0, 80));
+        if (new Set(options.map((option) => option.toLowerCase())).size !== options.length) {
+          return interaction.reply({ content: 'Every poll option must be different.', ephemeral: true });
+        }
+        const poll = {
+          question: interaction.options.getString('question', true).trim().slice(0, 1000),
+          options,
+          votes: {},
+        };
+        const message = await interaction.channel.send({ embeds: [pollEmbed(poll)], components: [pollActions(poll)], allowedMentions: { parse: [] } });
+        settings.polls[message.id] = poll;
+        saveSettings();
+        await sendLog(interaction.guild, 'Poll posted', `Question: **${poll.question}**\nPosted by: **${interaction.user.username}**`).catch(() => {});
+        await interaction.reply({ content: 'Poll posted.', ephemeral: true });
+      }
       return;
     }
 
     if (interaction.isButton()) {
+      if (interaction.customId === 'suggestion_open') return interaction.showModal(suggestionForm());
+      if (interaction.customId.startsWith('suggestion_status:')) {
+        if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to review suggestions.', ephemeral: true });
+        const suggestion = settings.suggestions[interaction.message.id];
+        if (!suggestion) return interaction.reply({ content: 'This suggestion is no longer being tracked.', ephemeral: true });
+        const status = interaction.customId.split(':')[1];
+        if (!['review', 'accepted', 'declined'].includes(status)) return interaction.reply({ content: 'Unknown suggestion status.', ephemeral: true });
+        if (['accepted', 'declined'].includes(suggestion.status)) return interaction.reply({ content: 'This suggestion has already received a final decision.', ephemeral: true });
+        suggestion.status = status;
+        suggestion.reviewedBy = interaction.user.username;
+        saveSettings();
+        await sendLog(interaction.guild, 'Suggestion reviewed', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+        return interaction.update({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions(status)] });
+      }
+      if (interaction.customId === 'giveaway_enter') {
+        const giveaway = settings.giveaways[interaction.message.id];
+        if (!giveaway || giveaway.ended || giveaway.endsAt <= Date.now()) {
+          if (giveaway && !giveaway.ended) await finishGiveaway(interaction.message.id, giveaway).catch(() => {});
+          return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+        }
+        if (giveaway.entries.includes(interaction.user.id)) return interaction.reply({ content: 'You have already entered this giveaway.', ephemeral: true });
+        giveaway.entries.push(interaction.user.id);
+        saveSettings();
+        return interaction.update({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()] });
+      }
+      if (interaction.customId.startsWith('poll_vote:')) {
+        const poll = settings.polls[interaction.message.id];
+        const index = Number(interaction.customId.split(':')[1]);
+        if (!poll || !Number.isInteger(index) || !poll.options[index]) return interaction.reply({ content: 'This poll is no longer active.', ephemeral: true });
+        poll.votes[interaction.user.id] = index;
+        saveSettings();
+        return interaction.update({ embeds: [pollEmbed(poll)], components: [pollActions(poll)] });
+      }
+      if (interaction.customId === 'application_open') {
+        if (!settings.applicationReviewChannelIds[interaction.guild.id]) {
+          return interaction.reply({ content: 'Applications are not configured yet. Please contact staff.', ephemeral: true });
+        }
+        const hasActiveApplication = Object.values(settings.applications).some((application) =>
+          application.guildId === interaction.guild.id
+          && application.authorId === interaction.user.id
+          && ['pending', 'claimed'].includes(application.status));
+        if (hasActiveApplication) return interaction.reply({ content: 'You already have an application under review.', ephemeral: true });
+        return interaction.showModal(applicationForm());
+      }
+      if (interaction.customId.startsWith('application_status:')) {
+        if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to review applications.', ephemeral: true });
+        const application = settings.applications[interaction.message.id];
+        const status = interaction.customId.split(':')[1];
+        if (!application || !['claimed', 'accepted', 'declined'].includes(status)) {
+          return interaction.reply({ content: 'This application is no longer being tracked.', ephemeral: true });
+        }
+        if (['accepted', 'declined'].includes(application.status)) return interaction.reply({ content: 'This application has already received a final decision.', ephemeral: true });
+        application.status = status;
+        application.staffName = interaction.user.username;
+        saveSettings();
+        await interaction.update({ embeds: [applicationEmbed(application)], components: [applicationActions(status)] });
+        await sendLog(interaction.guild, 'Application reviewed', `Application: **${application.position}**\nStatus: **${applicationStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+        if (['accepted', 'declined'].includes(status)) {
+          const applicant = await client.users.fetch(application.authorId).catch(() => null);
+          if (applicant) await applicant.send({
+            embeds: [new EmbedBuilder()
+              .setColor(0xF5F5F7)
+              .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+              .setTitle('Application update')
+              .setDescription(`Your application for **${application.position}** has been **${status}**.`)
+              .setFooter({ text: 'CORE. client' })],
+          }).catch(() => {});
+        }
+        return;
+      }
       if (interaction.customId === 'ticket_close') return closeTicket(interaction);
       if (interaction.customId === 'ticket_claim') {
         if (!(await isSupport(interaction.member))) {
@@ -788,6 +1149,55 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (rolesToRemove.length) await interaction.member.roles.remove(rolesToRemove, 'Updated roles from CORE. client role panel');
       if (rolesToAdd.length) await interaction.member.roles.add(rolesToAdd, 'Updated roles from CORE. client role panel');
       return interaction.reply({ content: 'Your roles have been updated.', ephemeral: true });
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'suggestion_submit') {
+      const channelId = settings.suggestionChannelIds[interaction.guild.id] || interaction.channelId;
+      const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+      if (!channel?.isTextBased()) return interaction.reply({ content: 'The suggestion channel is no longer available. Please contact staff.', ephemeral: true });
+      const suggestion = {
+        guildId: interaction.guild.id,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        authorAvatar: interaction.user.displayAvatarURL(),
+        title: interaction.fields.getTextInputValue('title'),
+        details: interaction.fields.getTextInputValue('details'),
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      const message = await channel.send({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions()], allowedMentions: { parse: [] } });
+      settings.suggestions[message.id] = suggestion;
+      saveSettings();
+      await sendLog(interaction.guild, 'Suggestion received', `Suggestion: **${suggestion.title}**\nFrom: **${interaction.user.username}**`).catch(() => {});
+      return interaction.reply({ content: 'Your suggestion has been sent to the team. Thank you!', ephemeral: true });
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'application_submit') {
+      const channelId = settings.applicationReviewChannelIds[interaction.guild.id];
+      const channel = channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null;
+      if (!channel?.isTextBased()) return interaction.reply({ content: 'Applications are not configured correctly. Please contact staff.', ephemeral: true });
+      const hasActiveApplication = Object.values(settings.applications).some((application) =>
+        application.guildId === interaction.guild.id
+        && application.authorId === interaction.user.id
+        && ['pending', 'claimed'].includes(application.status));
+      if (hasActiveApplication) return interaction.reply({ content: 'You already have an application under review.', ephemeral: true });
+      const application = {
+        guildId: interaction.guild.id,
+        authorId: interaction.user.id,
+        authorName: interaction.user.username,
+        authorAvatar: interaction.user.displayAvatarURL(),
+        position: interaction.fields.getTextInputValue('position'),
+        experience: interaction.fields.getTextInputValue('experience'),
+        availability: interaction.fields.getTextInputValue('availability'),
+        reason: interaction.fields.getTextInputValue('reason'),
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      const message = await channel.send({ embeds: [applicationEmbed(application)], components: [applicationActions()], allowedMentions: { parse: [] } });
+      settings.applications[message.id] = application;
+      saveSettings();
+      await sendLog(interaction.guild, 'Application received', `Application: **${application.position}**\nFrom: **${interaction.user.username}**`).catch(() => {});
+      return interaction.reply({ content: 'Your application has been sent privately to the team. Thank you!', ephemeral: true });
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_create:')) {
