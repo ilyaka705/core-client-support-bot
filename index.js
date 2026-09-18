@@ -12,8 +12,10 @@ const {
   GatewayIntentBits,
   ModalBuilder,
   PermissionsBitField,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
+  UserSelectMenuBuilder,
 } = require('discord.js');
 const { commandData } = require('./commands');
 
@@ -195,6 +197,31 @@ function ticketForm() {
     .addComponents(new ActionRowBuilder().addComponents(subject), new ActionRowBuilder().addComponents(description));
 }
 
+function isVoiceRoomOwner(interaction) {
+  return settings.temporaryVoiceChannels[interaction.channelId] === interaction.user.id
+    || interaction.member.permissions.has(PermissionsBitField.Flags.ManageChannels);
+}
+
+function voiceRoomActions() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('voice_room_invite').setLabel('Invite Member').setEmoji('➕').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('voice_room_limit').setLabel('Member Limit').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('voice_room_delete').setLabel('Close Room').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  );
+}
+
+async function sendVoiceRoomPanel(channel, owner) {
+  await channel.send({
+    embeds: [new EmbedBuilder()
+      .setColor(0x2B6CB0)
+      .setTitle('🔊 Your Private Voice Room')
+      .setDescription(`This room is private. Use the buttons below to invite members, set a member limit, or close it.\n\nRoom owner: **${owner.displayName}**`)
+      .setFooter({ text: 'CORE.client - Support • Temporary Voice Room' })],
+    components: [voiceRoomActions()],
+    allowedMentions: { parse: [] },
+  });
+}
+
 async function createTicket(interaction) {
   await interaction.deferReply({ ephemeral: true });
   const existing = interaction.guild.channels.cache.find(
@@ -306,14 +333,20 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const sourceChannel = newState.channel;
     const displayName = newState.member.displayName.replace(/[\\/@#:]/g, '').trim().slice(0, 80) || newState.member.user.username;
     const voiceChannel = await newState.guild.channels.create({
-      name: `🔊 ${displayName}'s Room`,
+      name: `╰・voice・${displayName}`,
       type: ChannelType.GuildVoice,
       parent: sourceChannel.parentId || undefined,
+      permissionOverwrites: [
+        { id: newState.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+        { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
+        { id: newState.member.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
+      ],
       reason: `Temporary voice room for ${newState.member.user.tag}`,
     });
     settings.temporaryVoiceChannels[voiceChannel.id] = newState.member.id;
     saveSettings();
     await newState.setChannel(voiceChannel, 'Moved to a personal temporary voice room');
+    await sendVoiceRoomPanel(voiceChannel, newState.member);
   } catch (error) {
     console.error('Join to Create:', error.message);
   }
@@ -403,7 +436,65 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.update({ embeds: [claimedEmbed], components: [ticketActions(interaction.user.username)] });
       }
       if (interaction.customId === 'ticket_open') return interaction.showModal(ticketForm());
+      if (interaction.customId === 'voice_room_invite') {
+        if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can invite members.', ephemeral: true });
+        return interaction.reply({
+          content: 'Choose a member to invite to this private voice room.',
+          components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder()
+            .setCustomId('voice_room_invite_user')
+            .setPlaceholder('Select a member to invite')
+            .setMinValues(1)
+            .setMaxValues(1))],
+          ephemeral: true,
+        });
+      }
+      if (interaction.customId === 'voice_room_limit') {
+        if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can set the member limit.', ephemeral: true });
+        return interaction.reply({
+          content: 'Choose the maximum number of members allowed in this room.',
+          components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+            .setCustomId('voice_room_limit_select')
+            .setPlaceholder('Select a member limit')
+            .addOptions(
+              { label: 'No limit', value: '0' },
+              { label: '2 members', value: '2' },
+              { label: '3 members', value: '3' },
+              { label: '5 members', value: '5' },
+              { label: '10 members', value: '10' },
+              { label: '20 members', value: '20' },
+              { label: '50 members', value: '50' },
+            ))],
+          ephemeral: true,
+        });
+      }
+      if (interaction.customId === 'voice_room_delete') {
+        if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can close this room.', ephemeral: true });
+        await interaction.reply({ content: 'This voice room will close in 3 seconds.', ephemeral: true });
+        delete settings.temporaryVoiceChannels[interaction.channelId];
+        saveSettings();
+        return setTimeout(() => interaction.channel.delete('Temporary voice room closed by its owner').catch(console.error), 3000);
+      }
       return;
+    }
+
+    if (interaction.isUserSelectMenu() && interaction.customId === 'voice_room_invite_user') {
+      if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can invite members.', ephemeral: true });
+      const memberId = interaction.values[0];
+      await interaction.channel.permissionOverwrites.edit(memberId, {
+        ViewChannel: true,
+        Connect: true,
+        Speak: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+      }, { reason: `Invited to private voice room by ${interaction.user.tag}` });
+      return interaction.update({ content: 'Member invited. They can now see and join this room.', components: [] });
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === 'voice_room_limit_select') {
+      if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can set the member limit.', ephemeral: true });
+      const limit = Number(interaction.values[0]);
+      await interaction.channel.setUserLimit(limit, `Member limit updated by ${interaction.user.tag}`);
+      return interaction.update({ content: limit ? `Member limit set to **${limit}**.` : 'Member limit removed.', components: [] });
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'ticket_create') await createTicket(interaction);
