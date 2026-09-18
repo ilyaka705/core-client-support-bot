@@ -106,24 +106,23 @@ async function checkTikTokFeeds() {
   }
 }
 
-const panelEmbed = new EmbedBuilder()
-  .setColor(0xF5F5F7)
-  .setTitle('CORE. client')
-  .setDescription('Support, made simple.\n\nOpen a ticket and tell us what you need.')
-  .addFields(
-    {
-      name: 'How it works',
-      value: 'Open a ticket · Share the details · Get help',
-    },
-    {
-      name: 'Private by default',
-      value: 'Only you and our support team can see your request.',
-    },
-  )
-  .setFooter({ text: 'CORE. client' });
+function ticketPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle('How can we help?')
+    .setDescription('Open a private support request and our team will take it from there.')
+    .addFields(
+      { name: '01  Start', value: 'Create a ticket below.' },
+      { name: '02  Share', value: 'Tell us what you need help with.' },
+      { name: '03  Resolve', value: 'A team member will reply as soon as possible.' },
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'Private support  •  CORE. client' });
+}
 
 const openRow = new ActionRowBuilder().addComponents(
-  new ButtonBuilder().setCustomId('ticket_open').setLabel('Open a ticket').setStyle(ButtonStyle.Primary),
+  new ButtonBuilder().setCustomId('ticket_open').setLabel('Create ticket').setStyle(ButtonStyle.Primary),
 );
 
 function ticketActions(claimedBy = null) {
@@ -355,7 +354,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
       if (interaction.commandName === 'ticketpaneel') {
-        await interaction.channel.send({ embeds: [panelEmbed], components: [openRow] });
+        await interaction.channel.send({ embeds: [ticketPanelEmbed()], components: [openRow] });
         await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'set-ticket-category') {
