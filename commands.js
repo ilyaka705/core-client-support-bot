@@ -15,15 +15,6 @@ const commandData = [
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
-    .setName('set-welcome-channel')
-    .setDescription('Choose where welcome messages are sent.')
-    .addChannelOption((option) => option
-      .setName('channel')
-      .setDescription('Welcome channel (leave empty to disable it)')
-      .addChannelTypes(ChannelType.GuildText)
-      .setRequired(false))
-    .setDefaultMemberPermissions(0x20n),
-  new SlashCommandBuilder()
     .setName('set-tiktok-feed')
     .setDescription('Automatically post new TikToks in a channel.')
     .addStringOption((option) => option
@@ -47,6 +38,14 @@ const commandData = [
       .setName('channel')
       .setDescription('Join this channel to create a personal voice room')
       .addChannelTypes(ChannelType.GuildVoice)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-auto-role')
+    .setDescription('Choose a role that new members receive automatically.')
+    .addRoleOption((option) => option
+      .setName('role')
+      .setDescription('Role to give new members (leave empty to disable)')
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
 ].map((command) => command.toJSON());

@@ -35,6 +35,7 @@ settings.welcomeChannelIds ??= {};
 settings.tiktokFeeds ??= {};
 settings.joinToCreateChannelIds ??= {};
 settings.temporaryVoiceChannels ??= {};
+settings.autoRoleIds ??= {};
 
 function saveSettings() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
@@ -85,13 +86,12 @@ async function checkTikTokFeed(guild, feed) {
   if (!channel?.isTextBased()) throw new Error('Configured TikTok channel was not found');
   await channel.send({
     embeds: [new EmbedBuilder()
-      .setColor(0x010101)
+      .setColor(0xF5F5F7)
       .setTitle(`New TikTok from @${feed.username}`)
       .setDescription(feed.description || latest.description.slice(0, 1000))
       .setURL(`https://www.tiktok.com/@${feed.username}/video/${latest.id}`)
       .setThumbnail(latest.cover)
-      .setFooter({ text: 'CORE.client - Support • TikTok Feed' })
-      .setTimestamp()],
+      .setFooter({ text: 'CORE. client • TikTok' })],
     allowedMentions: { parse: [] },
   });
   feed.lastVideoId = latest.id;
@@ -107,37 +107,34 @@ async function checkTikTokFeeds() {
 }
 
 const panelEmbed = new EmbedBuilder()
-  .setColor(0x2B6CB0)
-  .setTitle('🎫  CORE.client Support Center')
-  .setDescription('Welcome! Our support team is ready to help you.\n\nClick **Open Ticket** below to create a private support request.')
+  .setColor(0xF5F5F7)
+  .setTitle('CORE. client')
+  .setDescription('Support, made simple.\n\nOpen a ticket and tell us what you need.')
   .addFields(
     {
-      name: '📋 How it works',
-      value: '1. Click **Open Ticket**\n2. Fill in the short form\n3. A support member will claim your ticket',
+      name: 'How it works',
+      value: 'Open a ticket · Share the details · Get help',
     },
     {
-      name: '🔒 Private & secure',
-      value: 'Only you and our support team can see your ticket. Please do not share passwords or other sensitive information.',
+      name: 'Private by default',
+      value: 'Only you and our support team can see your request.',
     },
   )
-  .setFooter({ text: 'CORE.client - Support • We are here to help' })
-  .setTimestamp();
+  .setFooter({ text: 'CORE. client' });
 
 const openRow = new ActionRowBuilder().addComponents(
-  new ButtonBuilder().setCustomId('ticket_open').setLabel('Open Ticket').setEmoji('🎫').setStyle(ButtonStyle.Primary),
+  new ButtonBuilder().setCustomId('ticket_open').setLabel('Open a ticket').setStyle(ButtonStyle.Primary),
 );
 
 function ticketActions(claimedBy = null) {
   const claimButton = new ButtonBuilder()
     .setCustomId('ticket_claim')
     .setLabel(claimedBy ? `Claimed by ${claimedBy}` : 'Claim Ticket')
-    .setEmoji(claimedBy ? '✅' : '🙋')
     .setStyle(claimedBy ? ButtonStyle.Secondary : ButtonStyle.Success)
     .setDisabled(Boolean(claimedBy));
   const closeButton = new ButtonBuilder()
     .setCustomId('ticket_close')
     .setLabel('Close Ticket')
-    .setEmoji('🔒')
     .setStyle(ButtonStyle.Danger);
   return new ActionRowBuilder().addComponents(claimButton, closeButton);
 }
@@ -204,19 +201,19 @@ function isVoiceRoomOwner(interaction) {
 
 function voiceRoomActions() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('voice_room_invite').setLabel('Invite Member').setEmoji('➕').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('voice_room_limit').setLabel('Member Limit').setEmoji('👥').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('voice_room_delete').setLabel('Close Room').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('voice_room_invite').setLabel('Invite').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('voice_room_limit').setLabel('Member limit').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('voice_room_delete').setLabel('Close room').setStyle(ButtonStyle.Danger),
   );
 }
 
 async function sendVoiceRoomPanel(channel, owner) {
   await channel.send({
     embeds: [new EmbedBuilder()
-      .setColor(0x2B6CB0)
-      .setTitle('🔊 Your Private Voice Room')
-      .setDescription(`This room is private. Use the buttons below to invite members, set a member limit, or close it.\n\nRoom owner: **${owner.displayName}**`)
-      .setFooter({ text: 'CORE.client - Support • Temporary Voice Room' })],
+      .setColor(0xF5F5F7)
+      .setTitle('Your private room')
+      .setDescription(`Private room for **${owner.displayName}**.\n\nInvite people, set a member limit, or close this room when you are done.`)
+      .setFooter({ text: 'CORE. client' })],
     components: [voiceRoomActions()],
     allowedMentions: { parse: [] },
   });
@@ -249,17 +246,16 @@ async function createTicket(interaction) {
 
   await channel.send({
     embeds: [new EmbedBuilder()
-      .setColor(0x2B6CB0)
-      .setTitle('🎫 New Support Ticket')
-      .setDescription('A new support request has been submitted. A member of the support team can claim it below.')
+      .setColor(0xF5F5F7)
+      .setTitle('New request')
+      .setDescription('A support member can claim this request below.')
       .setThumbnail(client.user.displayAvatarURL())
       .setAuthor({ name: `Opened by ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL() })
       .addFields(
-        { name: '📌 Subject', value: subject },
-        { name: '📝 Issue Details', value: description },
+        { name: 'Subject', value: subject },
+        { name: 'Details', value: description },
       )
-      .setFooter({ text: 'Status: Unclaimed • Please do not share private information' })
-      .setTimestamp()],
+      .setFooter({ text: 'Unclaimed • CORE. client' })],
     components: [ticketActions()],
     allowedMentions: { parse: [] },
   });
@@ -298,24 +294,6 @@ client.on(Events.GuildCreate, async (guild) => {
   }
 });
 
-client.on(Events.GuildMemberAdd, async (member) => {
-  const channelId = settings.welcomeChannelIds[member.guild.id];
-  if (!channelId) return;
-  const channel = await member.guild.channels.fetch(channelId).catch(() => null);
-  if (!channel?.isTextBased()) return;
-
-  await channel.send({
-    content: `Welcome to **${member.guild.name}**, ${member}!`,
-    embeds: [new EmbedBuilder()
-      .setColor(0x57F287)
-      .setTitle('Welcome!')
-      .setDescription(`We're happy to have you here, ${member.user.username}. Please take a moment to read the server rules and enjoy your stay!`)
-      .setThumbnail(member.user.displayAvatarURL())
-      .setTimestamp()],
-    allowedMentions: { users: [member.id] },
-  }).catch(console.error);
-});
-
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   try {
     if (newState.member.user.bot) return;
@@ -352,16 +330,26 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   }
 });
 
+client.on(Events.GuildMemberAdd, async (member) => {
+  const roleId = settings.autoRoleIds[member.guild.id];
+  if (!roleId) return;
+  const role = await member.guild.roles.fetch(roleId).catch(() => null);
+  if (!role) return;
+  await member.roles.add(role, 'Automatic role for new member').catch((error) =>
+    console.error(`Could not give auto role in ${member.guild.name}:`, error.message),
+  );
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       const managementCommands = new Set([
         'ticketpaneel',
         'set-ticket-category',
-        'set-welcome-channel',
         'set-tiktok-feed',
         'remove-tiktok-feed',
         'set-join-to-create',
+        'set-auto-role',
       ]);
       if (managementCommands.has(interaction.commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -380,18 +368,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           delete settings.ticketCategoryIds[interaction.guild.id];
           saveSettings();
           await interaction.reply({ content: 'Ticket category removed. New tickets will be created without a category.', ephemeral: true });
-        }
-      }
-      if (interaction.commandName === 'set-welcome-channel') {
-        const channel = interaction.options.getChannel('channel');
-        if (channel) {
-          settings.welcomeChannelIds[interaction.guild.id] = channel.id;
-          saveSettings();
-          await interaction.reply({ content: `Welcome messages will now be sent in ${channel}.`, ephemeral: true });
-        } else {
-          delete settings.welcomeChannelIds[interaction.guild.id];
-          saveSettings();
-          await interaction.reply({ content: 'Welcome messages have been disabled.', ephemeral: true });
         }
       }
       if (interaction.commandName === 'set-tiktok-feed') {
@@ -417,6 +393,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
           delete settings.joinToCreateChannelIds[interaction.guild.id];
           saveSettings();
           await interaction.reply({ content: 'Join to Create has been disabled.', ephemeral: true });
+        }
+      }
+      if (interaction.commandName === 'set-auto-role') {
+        const role = interaction.options.getRole('role');
+        if (role) {
+          if (role.managed || role.position >= interaction.guild.members.me.roles.highest.position) {
+            return interaction.reply({ content: 'Move the bot role above this role before using it as an auto role.', ephemeral: true });
+          }
+          settings.autoRoleIds[interaction.guild.id] = role.id;
+          saveSettings();
+          await interaction.reply({ content: `New members will now automatically receive the **${role.name}** role.`, ephemeral: true });
+        } else {
+          delete settings.autoRoleIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Automatic role assignment has been disabled.', ephemeral: true });
         }
       }
       return;
