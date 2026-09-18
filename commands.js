@@ -58,11 +58,28 @@ const commandData = [
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
     .setName('set-suggestion-channel')
+    .setDescription('Choose the public channel where suggestions are posted.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Public suggestion channel (leave empty to disable suggestions)')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-suggestion-staff-channel')
     .setDescription('Choose the private staff channel where suggestions are reviewed.')
     .addChannelOption((option) => option
       .setName('channel')
       .setDescription('Private staff channel (leave empty to disable suggestions)')
       .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-suggestion-role')
+    .setDescription('Choose the role allowed to submit and vote on suggestions.')
+    .addRoleOption((option) => option
+      .setName('role')
+      .setDescription('Verified or member role (leave empty to allow everyone)')
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()

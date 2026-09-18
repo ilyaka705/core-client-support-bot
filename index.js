@@ -52,6 +52,8 @@ settings.logChannelIds ??= {};
 settings.ticketLogChannelIds ??= {};
 settings.rolePanels ??= {};
 settings.suggestionChannelIds ??= {};
+settings.suggestionStaffChannelIds ??= {};
+settings.suggestionRoleIds ??= {};
 settings.suggestions ??= {};
 settings.giveaways ??= {};
 settings.polls ??= {};
@@ -255,7 +257,31 @@ function rulesPanelEmbeds() {
 }
 
 function suggestionStatusLabel(status) {
-  return ({ pending: 'Pending review', review: 'Under review', accepted: 'Accepted', declined: 'Declined' })[status] || 'Pending review';
+  return ({
+    open: 'Open for voting',
+    review: 'Under review',
+    planned: 'Planned',
+    progress: 'In progress',
+    shipped: 'Shipped',
+    not_planned: 'Not planned',
+  })[status] || 'Open for voting';
+}
+
+function suggestionIsFinal(suggestion) {
+  return ['shipped', 'not_planned'].includes(suggestion.status);
+}
+
+function suggestionVoteCounts(suggestion) {
+  const votes = Object.values(suggestion.votes || {});
+  return {
+    support: votes.filter((vote) => vote === 'support').length,
+    pass: votes.filter((vote) => vote === 'pass').length,
+  };
+}
+
+function canUseSuggestions(member) {
+  const requiredRoleId = settings.suggestionRoleIds[member.guild.id];
+  return !requiredRoleId || member.roles.cache.has(requiredRoleId) || canManageBot(member);
 }
 
 function suggestionPanelEmbed() {
@@ -263,36 +289,95 @@ function suggestionPanelEmbed() {
     .setColor(0xF5F5F7)
     .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
     .setTitle('Share an idea')
-    .setDescription('Have an idea that could make CORE. client better? Send it to the team. Every suggestion is reviewed privately by staff.')
+    .setDescription('Have an idea that could make CORE. client better? Share it with the community, let members vote, and the team will keep everyone updated.')
     .addFields(
-      { name: '01  Keep it clear', value: 'Describe the idea and why it would help.' },
-      { name: '02  Be constructive', value: 'Helpful feedback gives us the best chance to improve.' },
+      { name: '01  Share', value: 'Describe the idea and why it would help.' },
+      { name: '02  Vote', value: 'Members can support an idea or mark it as not for them.' },
+      { name: '03  Follow', value: 'Staff will share the current status and any team update.' },
     )
     .setThumbnail(client.user.displayAvatarURL())
     .setFooter({ text: 'CORE. client  •  Suggestions' });
 }
 
-function suggestionActions(status = 'pending') {
-  const isFinal = ['accepted', 'declined'].includes(status);
+function suggestionPanelActions() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('suggestion_status:review').setLabel('Under Review').setStyle(ButtonStyle.Primary).setDisabled(isFinal || status === 'review'),
-    new ButtonBuilder().setCustomId('suggestion_status:accepted').setLabel('Accept').setStyle(ButtonStyle.Success).setDisabled(isFinal),
-    new ButtonBuilder().setCustomId('suggestion_status:declined').setLabel('Decline').setStyle(ButtonStyle.Danger).setDisabled(isFinal),
+    new ButtonBuilder().setCustomId('suggestion_open:public').setLabel('Submit a Suggestion').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('suggestion_open:anonymous').setLabel('Submit Anonymously').setStyle(ButtonStyle.Secondary),
   );
 }
 
-function suggestionEmbed(suggestion) {
+function suggestionPublicActions(suggestion) {
+  const disabled = suggestionIsFinal(suggestion);
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('suggestion_vote:support').setLabel('Support').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('suggestion_vote:pass').setLabel('Not for me').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('suggestion_vote:remove').setLabel('Remove vote').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('suggestion_discuss').setLabel('Discuss').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+  );
+}
+
+function suggestionStaffActions(suggestion) {
+  const disabled = suggestionIsFinal(suggestion);
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('suggestion_staff_status:review').setLabel('Review').setStyle(ButtonStyle.Primary).setDisabled(disabled || suggestion.status === 'review'),
+      new ButtonBuilder().setCustomId('suggestion_staff_status:planned').setLabel('Plan').setStyle(ButtonStyle.Success).setDisabled(disabled || suggestion.status === 'planned'),
+      new ButtonBuilder().setCustomId('suggestion_staff_status:progress').setLabel('In Progress').setStyle(ButtonStyle.Primary).setDisabled(disabled || suggestion.status === 'progress'),
+      new ButtonBuilder().setCustomId('suggestion_staff_status:shipped').setLabel('Shipped').setStyle(ButtonStyle.Success).setDisabled(disabled),
+      new ButtonBuilder().setCustomId('suggestion_staff_status:not_planned').setLabel('Not Planned').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('suggestion_staff_note').setLabel('Add or Edit Team Note').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+    ),
+  ];
+}
+
+function suggestionPublicEmbed(suggestion) {
+  const votes = suggestionVoteCounts(suggestion);
   return new EmbedBuilder()
     .setColor(0xF5F5F7)
-    .setAuthor({ name: `Suggestion from ${suggestion.authorName}`, iconURL: suggestion.authorAvatar })
-    .setTitle(suggestion.title.slice(0, 256))
+    .setAuthor({
+      name: suggestion.anonymous ? 'Anonymous suggestion' : `Suggestion from ${suggestion.authorName}`,
+      iconURL: suggestion.anonymous ? client.user.displayAvatarURL() : suggestion.authorAvatar,
+    })
+    .setTitle(`[${suggestion.category}] ${suggestion.title}`.slice(0, 256))
     .setDescription(suggestion.details.slice(0, 4096))
-    .addFields({ name: 'Status', value: suggestionStatusLabel(suggestion.status), inline: true })
-    .setFooter({ text: 'CORE. client  •  Suggestions' })
+    .addFields(
+      { name: 'Support', value: String(votes.support), inline: true },
+      { name: 'Not for me', value: String(votes.pass), inline: true },
+      { name: 'Status', value: suggestionStatusLabel(suggestion.status), inline: true },
+      ...(suggestion.teamNote ? [{ name: 'Team update', value: suggestion.teamNote.slice(0, 1024) }] : []),
+    )
+    .setFooter({ text: 'One vote per member  •  CORE. client' })
     .setTimestamp(suggestion.createdAt);
 }
 
-function suggestionForm() {
+function suggestionStaffEmbed(suggestion) {
+  const votes = suggestionVoteCounts(suggestion);
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: `Private review  •  ${suggestion.authorName}`, iconURL: suggestion.authorAvatar })
+    .setTitle(`[${suggestion.category}] ${suggestion.title}`.slice(0, 256))
+    .setDescription(suggestion.details.slice(0, 4096))
+    .addFields(
+      { name: 'Submitted by', value: `${suggestion.authorName}\nID: ${suggestion.authorId}`, inline: true },
+      { name: 'Public visibility', value: suggestion.anonymous ? 'Anonymous' : 'Named', inline: true },
+      { name: 'Votes', value: `Support: **${votes.support}**\nNot for me: **${votes.pass}**`, inline: true },
+      { name: 'Status', value: suggestionStatusLabel(suggestion.status), inline: true },
+      ...(suggestion.teamNote ? [{ name: 'Team note', value: suggestion.teamNote.slice(0, 1024) }] : []),
+    )
+    .setFooter({ text: suggestion.staffName ? `Updated by ${suggestion.staffName}  •  CORE. client` : 'CORE. client  •  Private staff review' })
+    .setTimestamp(suggestion.createdAt);
+}
+
+function suggestionForm(anonymous = false) {
+  const category = new TextInputBuilder()
+    .setCustomId('category')
+    .setLabel('Category')
+    .setPlaceholder('For example: Feature, event, community, or server')
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(50)
+    .setRequired(true);
   const title = new TextInputBuilder()
     .setCustomId('title')
     .setLabel('What is your idea?')
@@ -308,9 +393,68 @@ function suggestionForm() {
     .setMaxLength(1000)
     .setRequired(true);
   return new ModalBuilder()
-    .setCustomId('suggestion_submit')
+    .setCustomId(`suggestion_submit:${anonymous ? 'anonymous' : 'public'}`)
     .setTitle('New suggestion')
-    .addComponents(new ActionRowBuilder().addComponents(title), new ActionRowBuilder().addComponents(details));
+    .addComponents(
+      new ActionRowBuilder().addComponents(category),
+      new ActionRowBuilder().addComponents(title),
+      new ActionRowBuilder().addComponents(details),
+    );
+}
+
+function suggestionNoteForm(suggestion, status) {
+  const note = new TextInputBuilder()
+    .setCustomId('note')
+    .setLabel(status === 'not_planned' ? 'Why is this not planned?' : 'Team update')
+    .setPlaceholder(status === 'not_planned' ? 'Write a clear, respectful explanation...' : 'Share a short update for the community...')
+    .setStyle(TextInputStyle.Paragraph)
+    .setMaxLength(1000)
+    .setRequired(true);
+  return new ModalBuilder()
+    .setCustomId(`suggestion_note:${status}:${suggestion.publicMessageId}`)
+    .setTitle('Suggestion team update')
+    .addComponents(new ActionRowBuilder().addComponents(note));
+}
+
+async function updatePublicSuggestion(suggestion) {
+  const channel = await client.channels.fetch(suggestion.publicChannelId).catch(() => null);
+  if (!channel?.isTextBased()) return;
+  const message = await channel.messages.fetch(suggestion.publicMessageId).catch(() => null);
+  if (message) await message.edit({ embeds: [suggestionPublicEmbed(suggestion)], components: [suggestionPublicActions(suggestion)] });
+}
+
+async function updateStaffSuggestion(suggestion) {
+  const channel = await client.channels.fetch(suggestion.staffChannelId).catch(() => null);
+  if (!channel?.isTextBased()) return;
+  const message = await channel.messages.fetch(suggestion.staffMessageId).catch(() => null);
+  if (message) await message.edit({ embeds: [suggestionStaffEmbed(suggestion)], components: suggestionStaffActions(suggestion) });
+}
+
+async function sendSuggestionStatusDm(suggestion) {
+  const user = await client.users.fetch(suggestion.authorId).catch(() => null);
+  if (!user) return;
+  await user.send({
+    embeds: [new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+      .setTitle('Suggestion update')
+      .setDescription(`Your suggestion **${suggestion.title}** is now **${suggestionStatusLabel(suggestion.status)}**.`)
+      .setFooter({ text: 'CORE. client' })],
+  }).catch(() => {});
+}
+
+function suggestionSubmissionBlockReason(guildId, userId) {
+  const userSuggestions = Object.values(settings.suggestions)
+    .filter((suggestion) => suggestion.guildId === guildId && suggestion.authorId === userId);
+  const activeCount = userSuggestions.filter((suggestion) => !suggestionIsFinal(suggestion)).length;
+  if (activeCount >= 2) return 'You already have two active suggestions. Please wait for a team update before submitting another one.';
+  const lastSubmittedAt = Math.max(0, ...userSuggestions.map((suggestion) => suggestion.createdAt || 0));
+  const cooldownMs = 6 * 60 * 60 * 1000;
+  if (lastSubmittedAt && Date.now() - lastSubmittedAt < cooldownMs) {
+    const minutes = Math.ceil((cooldownMs - (Date.now() - lastSubmittedAt)) / 60000);
+    return `Please wait **${minutes} minutes** before sending another suggestion.`;
+  }
+  return null;
 }
 
 function giveawayEmbed(giveaway) {
@@ -780,6 +924,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'rulepanel',
         'suggestionpanel',
         'set-suggestion-channel',
+        'set-suggestion-staff-channel',
+        'set-suggestion-role',
         'set-ticket-category',
         'set-tiktok-feed',
         'remove-tiktok-feed',
@@ -805,13 +951,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'suggestionpanel') {
-        if (!settings.suggestionChannelIds[interaction.guild.id]) {
-          return interaction.reply({ content: 'Set a private suggestion review channel first with /set-suggestion-channel.', ephemeral: true });
+        if (!settings.suggestionChannelIds[interaction.guild.id] || !settings.suggestionStaffChannelIds[interaction.guild.id]) {
+          return interaction.reply({ content: 'Set both the public suggestion channel and private staff channel first.', ephemeral: true });
         }
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('suggestion_open').setLabel('Submit a Suggestion').setStyle(ButtonStyle.Primary),
-        );
-        await interaction.channel.send({ embeds: [suggestionPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
+        await interaction.channel.send({ embeds: [suggestionPanelEmbed()], components: [suggestionPanelActions()], allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Suggestion panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'set-ticket-category') {
@@ -871,11 +1014,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (channel) {
           settings.suggestionChannelIds[interaction.guild.id] = channel.id;
           saveSettings();
-          await interaction.reply({ content: `New suggestions will now be sent privately to ${channel}.`, ephemeral: true });
+          await interaction.reply({ content: `Public suggestions will now be posted in ${channel}.`, ephemeral: true });
         } else {
           delete settings.suggestionChannelIds[interaction.guild.id];
           saveSettings();
           await interaction.reply({ content: 'Suggestions have been disabled.', ephemeral: true });
+        }
+      }
+      if (interaction.commandName === 'set-suggestion-staff-channel') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          settings.suggestionStaffChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `Private suggestion reviews will now be sent to ${channel}.`, ephemeral: true });
+        } else {
+          delete settings.suggestionStaffChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Private suggestion reviews have been disabled.', ephemeral: true });
+        }
+      }
+      if (interaction.commandName === 'set-suggestion-role') {
+        const role = interaction.options.getRole('role');
+        if (role) {
+          settings.suggestionRoleIds[interaction.guild.id] = role.id;
+          saveSettings();
+          await interaction.reply({ content: `Only members with **${role.name}** can now submit and vote on suggestions.`, ephemeral: true });
+        } else {
+          delete settings.suggestionRoleIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'All members can now submit and vote on suggestions.', ephemeral: true });
         }
       }
       if (interaction.commandName === 'set-log-channel') {
@@ -981,31 +1148,90 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
-      if (interaction.customId === 'suggestion_open') {
-        if (!settings.suggestionChannelIds[interaction.guild.id]) {
+      if (interaction.customId === 'suggestion_open' || interaction.customId.startsWith('suggestion_open:')) {
+        if (!settings.suggestionChannelIds[interaction.guild.id] || !settings.suggestionStaffChannelIds[interaction.guild.id]) {
           return interaction.reply({ content: 'Suggestions are not configured yet. Please contact staff.', ephemeral: true });
         }
-        return interaction.showModal(suggestionForm());
+        if (!canUseSuggestions(interaction.member)) return interaction.reply({ content: 'You need the verified member role before you can submit suggestions.', ephemeral: true });
+        const blockReason = suggestionSubmissionBlockReason(interaction.guild.id, interaction.user.id);
+        if (blockReason) return interaction.reply({ content: blockReason, ephemeral: true });
+        return interaction.showModal(suggestionForm(interaction.customId.endsWith(':anonymous')));
       }
-      if (interaction.customId.startsWith('suggestion_status:')) {
-        if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to review suggestions.', ephemeral: true });
+      if (interaction.customId.startsWith('suggestion_vote:')) {
         const suggestion = settings.suggestions[interaction.message.id];
-        if (!suggestion) return interaction.reply({ content: 'This suggestion is no longer being tracked.', ephemeral: true });
-        const status = interaction.customId.split(':')[1];
-        if (!['review', 'accepted', 'declined'].includes(status)) return interaction.reply({ content: 'Unknown suggestion status.', ephemeral: true });
-        if (['accepted', 'declined'].includes(suggestion.status)) return interaction.reply({ content: 'This suggestion has already received a final decision.', ephemeral: true });
-        if (suggestion.status === status) return interaction.reply({ content: `This suggestion is already **${suggestionStatusLabel(status)}**.`, ephemeral: true });
-        const lockKey = `suggestion:${interaction.message.id}`;
-        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This suggestion is already being updated.', ephemeral: true });
+        const vote = interaction.customId.split(':')[1];
+        if (!suggestion || suggestionIsFinal(suggestion)) return interaction.reply({ content: 'Voting on this suggestion has ended.', ephemeral: true });
+        if (!canUseSuggestions(interaction.member)) return interaction.reply({ content: 'You need the verified member role before you can vote.', ephemeral: true });
+        if (!['support', 'pass', 'remove'].includes(vote)) return interaction.reply({ content: 'Unknown vote.', ephemeral: true });
+        const lockKey = `suggestion-vote:${interaction.message.id}:${interaction.user.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your vote is already being updated.', ephemeral: true });
         try {
-          suggestion.status = status;
-          suggestion.reviewedBy = interaction.user.username;
+          suggestion.votes ??= {};
+          if (vote === 'remove') {
+            if (!suggestion.votes[interaction.user.id]) return interaction.reply({ content: 'You do not have a vote to remove.', ephemeral: true });
+            delete suggestion.votes[interaction.user.id];
+          } else {
+            suggestion.votes[interaction.user.id] = vote;
+          }
           saveSettings();
-          await sendLog(interaction.guild, 'Suggestion reviewed', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
-          return interaction.update({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions(status)] });
+          await interaction.update({ embeds: [suggestionPublicEmbed(suggestion)], components: [suggestionPublicActions(suggestion)] });
+          await updateStaffSuggestion(suggestion).catch(() => {});
+          return;
         } finally {
           releaseActionLock(lockKey);
         }
+      }
+      if (interaction.customId === 'suggestion_discuss') {
+        const suggestion = settings.suggestions[interaction.message.id];
+        if (!suggestion || suggestionIsFinal(suggestion)) return interaction.reply({ content: 'Discussion is no longer available for this suggestion.', ephemeral: true });
+        if (!canUseSuggestions(interaction.member)) return interaction.reply({ content: 'You need the verified member role before you can discuss suggestions.', ephemeral: true });
+        if (suggestion.threadId) return interaction.reply({ content: `Join the discussion here: <#${suggestion.threadId}>`, ephemeral: true });
+        const lockKey = `suggestion-discuss:${interaction.message.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'The discussion is already being created.', ephemeral: true });
+        try {
+          await interaction.deferReply({ ephemeral: true });
+          const thread = await interaction.message.startThread({
+            name: `suggestion-${suggestion.title}`.replace(/[^a-zA-Z0-9 -]/g, '').slice(0, 90) || 'suggestion-discussion',
+            autoArchiveDuration: 1440,
+            reason: `Discussion started by ${interaction.user.tag}`,
+          });
+          suggestion.threadId = thread.id;
+          saveSettings();
+          return interaction.editReply(`Discussion created: ${thread}`);
+        } finally {
+          releaseActionLock(lockKey);
+        }
+      }
+      if (interaction.customId.startsWith('suggestion_staff_status:')) {
+        if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to review suggestions.', ephemeral: true });
+        const suggestion = Object.values(settings.suggestions).find((item) => item.staffMessageId === interaction.message.id);
+        const status = interaction.customId.split(':')[1];
+        if (!suggestion || !['review', 'planned', 'progress', 'shipped', 'not_planned'].includes(status)) {
+          return interaction.reply({ content: 'This suggestion is no longer being tracked.', ephemeral: true });
+        }
+        if (suggestionIsFinal(suggestion)) return interaction.reply({ content: 'This suggestion has already received a final decision.', ephemeral: true });
+        if (suggestion.status === status) return interaction.reply({ content: `This suggestion is already **${suggestionStatusLabel(status)}**.`, ephemeral: true });
+        if (status === 'not_planned') return interaction.showModal(suggestionNoteForm(suggestion, status));
+        const lockKey = `suggestion-staff:${suggestion.publicMessageId}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This suggestion is already being updated.', ephemeral: true });
+        try {
+          suggestion.status = status;
+          suggestion.staffName = interaction.user.username;
+          saveSettings();
+          await interaction.update({ embeds: [suggestionStaffEmbed(suggestion)], components: suggestionStaffActions(suggestion) });
+          await updatePublicSuggestion(suggestion).catch(() => {});
+          await sendLog(interaction.guild, 'Suggestion reviewed', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+          await sendSuggestionStatusDm(suggestion);
+          return;
+        } finally {
+          releaseActionLock(lockKey);
+        }
+      }
+      if (interaction.customId === 'suggestion_staff_note') {
+        if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to update suggestions.', ephemeral: true });
+        const suggestion = Object.values(settings.suggestions).find((item) => item.staffMessageId === interaction.message.id);
+        if (!suggestion || suggestionIsFinal(suggestion)) return interaction.reply({ content: 'This suggestion can no longer be updated.', ephemeral: true });
+        return interaction.showModal(suggestionNoteForm(suggestion, suggestion.status));
       }
       if (interaction.customId === 'giveaway_enter') {
         const giveaway = settings.giveaways[interaction.message.id];
@@ -1276,28 +1502,85 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return interaction.reply({ content: 'Your roles have been updated.', ephemeral: true });
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === 'suggestion_submit') {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('suggestion_submit:')) {
+      if (!canUseSuggestions(interaction.member)) return interaction.reply({ content: 'You need the verified member role before you can submit suggestions.', ephemeral: true });
       const lockKey = `suggestion-submit:${interaction.guild.id}:${interaction.user.id}`;
       if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your suggestion is already being sent.', ephemeral: true });
       try {
-        const channelId = settings.suggestionChannelIds[interaction.guild.id];
-        const channel = channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null;
-        if (!channel?.isTextBased()) return interaction.reply({ content: 'The suggestion channel is no longer available. Please contact staff.', ephemeral: true });
+        const blockReason = suggestionSubmissionBlockReason(interaction.guild.id, interaction.user.id);
+        if (blockReason) return interaction.reply({ content: blockReason, ephemeral: true });
+        const publicChannelId = settings.suggestionChannelIds[interaction.guild.id];
+        const staffChannelId = settings.suggestionStaffChannelIds[interaction.guild.id];
+        const publicChannel = publicChannelId ? await interaction.guild.channels.fetch(publicChannelId).catch(() => null) : null;
+        const staffChannel = staffChannelId ? await interaction.guild.channels.fetch(staffChannelId).catch(() => null) : null;
+        if (!publicChannel?.isTextBased() || !staffChannel?.isTextBased()) {
+          return interaction.reply({ content: 'Suggestion channels are not configured correctly. Please contact staff.', ephemeral: true });
+        }
         const suggestion = {
           guildId: interaction.guild.id,
           authorId: interaction.user.id,
           authorName: interaction.user.username,
           authorAvatar: interaction.user.displayAvatarURL(),
+          anonymous: interaction.customId.endsWith(':anonymous'),
+          category: interaction.fields.getTextInputValue('category'),
           title: interaction.fields.getTextInputValue('title'),
           details: interaction.fields.getTextInputValue('details'),
-          status: 'pending',
+          status: 'open',
+          votes: {},
+          publicChannelId,
+          staffChannelId,
           createdAt: Date.now(),
         };
-        const message = await channel.send({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions()], allowedMentions: { parse: [] } });
-        settings.suggestions[message.id] = suggestion;
+        let publicMessage;
+        try {
+          publicMessage = await publicChannel.send({
+            embeds: [suggestionPublicEmbed(suggestion)],
+            components: [suggestionPublicActions(suggestion)],
+            allowedMentions: { parse: [] },
+          });
+          suggestion.publicMessageId = publicMessage.id;
+          const staffMessage = await staffChannel.send({
+            embeds: [suggestionStaffEmbed(suggestion)],
+            components: suggestionStaffActions(suggestion),
+            allowedMentions: { parse: [] },
+          });
+          suggestion.staffMessageId = staffMessage.id;
+        } catch (error) {
+          if (publicMessage) await publicMessage.delete().catch(() => {});
+          throw error;
+        }
+        settings.suggestions[suggestion.publicMessageId] = suggestion;
         saveSettings();
         await sendLog(interaction.guild, 'Suggestion received', `Suggestion: **${suggestion.title}**\nFrom: **${interaction.user.username}**`).catch(() => {});
-        return interaction.reply({ content: 'Your suggestion has been sent to the team. Thank you!', ephemeral: true });
+        return interaction.reply({ content: 'Your suggestion is now open for community voting. Thank you!', ephemeral: true });
+      } finally {
+        releaseActionLock(lockKey);
+      }
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('suggestion_note:')) {
+      if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to update suggestions.', ephemeral: true });
+      const [, status, publicMessageId] = interaction.customId.split(':');
+      const suggestion = settings.suggestions[publicMessageId];
+      if (!suggestion || !['open', 'review', 'planned', 'progress', 'not_planned'].includes(status)) {
+        return interaction.reply({ content: 'This suggestion is no longer being tracked.', ephemeral: true });
+      }
+      if (suggestionIsFinal(suggestion)) {
+        return interaction.reply({ content: 'This suggestion can no longer be updated.', ephemeral: true });
+      }
+      const lockKey = `suggestion-staff:${publicMessageId}`;
+      if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This suggestion is already being updated.', ephemeral: true });
+      try {
+        await interaction.deferReply({ ephemeral: true });
+        suggestion.teamNote = interaction.fields.getTextInputValue('note');
+        if (status === 'not_planned') suggestion.status = 'not_planned';
+        suggestion.staffName = interaction.user.username;
+        saveSettings();
+        await updatePublicSuggestion(suggestion);
+        await updateStaffSuggestion(suggestion);
+        await sendLog(interaction.guild, 'Suggestion updated', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(suggestion.status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+        await sendSuggestionStatusDm(suggestion);
+        return interaction.editReply('Suggestion update saved.');
       } finally {
         releaseActionLock(lockKey);
       }
