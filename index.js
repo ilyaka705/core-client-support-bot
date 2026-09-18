@@ -21,7 +21,7 @@ const required = ['DISCORD_TOKEN'];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) throw new Error(`Missing .env values: ${missing.join(', ')}`);
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates] });
 const config = {
   categoryId: process.env.TICKET_CATEGORY_ID || null,
 };
@@ -31,6 +31,8 @@ settings.supportRoleIds ??= {};
 settings.ticketCategoryIds ??= {};
 settings.welcomeChannelIds ??= {};
 settings.tiktokFeeds ??= {};
+settings.joinToCreateChannelIds ??= {};
+settings.temporaryVoiceChannels ??= {};
 
 function saveSettings() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
@@ -287,6 +289,36 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }).catch(console.error);
 });
 
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  try {
+    if (newState.member.user.bot) return;
+
+    const previousChannel = oldState.channel;
+    if (previousChannel && settings.temporaryVoiceChannels[previousChannel.id] && previousChannel.members.size === 0) {
+      delete settings.temporaryVoiceChannels[previousChannel.id];
+      saveSettings();
+      await previousChannel.delete('Temporary voice channel is empty').catch(console.error);
+    }
+
+    const joinToCreateId = settings.joinToCreateChannelIds[newState.guild.id];
+    if (!joinToCreateId || newState.channelId !== joinToCreateId) return;
+
+    const sourceChannel = newState.channel;
+    const displayName = newState.member.displayName.replace(/[\\/@#:]/g, '').trim().slice(0, 80) || newState.member.user.username;
+    const voiceChannel = await newState.guild.channels.create({
+      name: `🔊 ${displayName}'s Room`,
+      type: ChannelType.GuildVoice,
+      parent: sourceChannel.parentId || undefined,
+      reason: `Temporary voice room for ${newState.member.user.tag}`,
+    });
+    settings.temporaryVoiceChannels[voiceChannel.id] = newState.member.id;
+    saveSettings();
+    await newState.setChannel(voiceChannel, 'Moved to a personal temporary voice room');
+  } catch (error) {
+    console.error('Join to Create:', error.message);
+  }
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
@@ -296,6 +328,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-welcome-channel',
         'set-tiktok-feed',
         'remove-tiktok-feed',
+        'set-join-to-create',
       ]);
       if (managementCommands.has(interaction.commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
@@ -304,7 +337,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.channel.send({ embeds: [panelEmbed], components: [openRow] });
         await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'sluit-ticket') await closeTicket(interaction);
       if (interaction.commandName === 'set-ticket-category') {
         const category = interaction.options.getChannel('category');
         if (category) {
@@ -341,6 +373,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         delete settings.tiktokFeeds[interaction.guild.id];
         saveSettings();
         await interaction.reply({ content: 'Automatic TikTok posts have been disabled.', ephemeral: true });
+      }
+      if (interaction.commandName === 'set-join-to-create') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          settings.joinToCreateChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `Join to Create is now active. Members who join ${channel} will receive a temporary voice room.`, ephemeral: true });
+        } else {
+          delete settings.joinToCreateChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Join to Create has been disabled.', ephemeral: true });
+        }
       }
       return;
     }

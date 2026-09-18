@@ -6,10 +6,6 @@ const commandData = [
     .setDescription('Post the ticket panel in this channel.')
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
-    .setName('sluit-ticket')
-    .setDescription('Close this ticket (support staff only).')
-    .setDefaultMemberPermissions(0x2000n),
-  new SlashCommandBuilder()
     .setName('set-ticket-category')
     .setDescription('Choose where new tickets are created.')
     .addChannelOption((option) => option
@@ -43,6 +39,15 @@ const commandData = [
   new SlashCommandBuilder()
     .setName('remove-tiktok-feed')
     .setDescription('Turn off automatic TikTok posts.')
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-join-to-create')
+    .setDescription('Choose the voice channel that creates temporary voice rooms.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Join this channel to create a personal voice room')
+      .addChannelTypes(ChannelType.GuildVoice)
+      .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
 ].map((command) => command.toJSON());
 
