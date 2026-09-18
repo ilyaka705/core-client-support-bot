@@ -48,6 +48,24 @@ const commandData = [
       .setDescription('Role to give new members (leave empty to disable)')
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-log-channel')
+    .setDescription('Choose where staff activity and ticket transcripts are saved.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Private staff log channel (leave empty to disable)')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('rolepanel')
+    .setDescription('Post a self-role panel in this channel.')
+    .addRoleOption((option) => option.setName('role1').setDescription('First role').setRequired(true))
+    .addRoleOption((option) => option.setName('role2').setDescription('Second role').setRequired(false))
+    .addRoleOption((option) => option.setName('role3').setDescription('Third role').setRequired(false))
+    .addRoleOption((option) => option.setName('role4').setDescription('Fourth role').setRequired(false))
+    .addRoleOption((option) => option.setName('role5').setDescription('Fifth role').setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
 ].map((command) => command.toJSON());
 
 module.exports = { commandData };
