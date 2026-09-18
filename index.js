@@ -937,6 +937,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await sendLog(interaction.guild, 'Messages cleared', `Channel: **${interaction.channel.name}**\nDeleted: **${deleted.size}** messages\nBy: **${interaction.user.username}**`).catch((error) => console.error('Staff log:', error.message));
         return interaction.reply({ content: `Cleared **${deleted.size}** messages. Messages older than 14 days cannot be removed by Discord.`, ephemeral: true });
       }
+      if (interaction.commandName === 'server-status') {
+        if (!(await isSupport(interaction.member))) {
+          return interaction.reply({ content: 'This private server overview is only available to staff.', ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+        const channels = await interaction.guild.channels.fetch();
+        const openTickets = channels.filter((channel) => channel.isTextBased() && channel.topic?.startsWith('ticket-owner:')).size;
+        const temporaryVoiceRooms = Object.keys(settings.temporaryVoiceChannels)
+          .filter((channelId) => channels.get(channelId)?.guild?.id === interaction.guild.id).length;
+        const activeGiveaways = Object.values(settings.giveaways)
+          .filter((giveaway) => giveaway.guildId === interaction.guild.id && !giveaway.ended && giveaway.endsAt > Date.now()).length;
+        const openSuggestions = Object.values(settings.suggestions)
+          .filter((suggestion) => suggestion.guildId === interaction.guild.id && !suggestionIsFinal(suggestion)).length;
+        const supportRoleId = await ensureSupportRole(interaction.guild);
+        const supportRole = interaction.guild.roles.cache.get(supportRoleId);
+        const supportCount = supportRole?.members.size || 0;
+        const embed = new EmbedBuilder()
+          .setColor(0xF5F5F7)
+          .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+          .setTitle('Server overview')
+          .setDescription(`Private staff overview for **${interaction.guild.name}**.`)
+          .addFields(
+            { name: 'Members', value: `**${interaction.guild.memberCount}** total`, inline: true },
+            { name: 'Open tickets', value: `**${openTickets}** active`, inline: true },
+            { name: 'Support team', value: `**${supportCount}** members`, inline: true },
+            { name: 'Temporary voice rooms', value: `**${temporaryVoiceRooms}** active`, inline: true },
+            { name: 'Active giveaways', value: `**${activeGiveaways}** running`, inline: true },
+            { name: 'Open suggestions', value: `**${openSuggestions}** awaiting a final decision`, inline: true },
+          )
+          .setFooter({ text: 'CORE. client  •  Visible to staff only' })
+          .setTimestamp();
+        return interaction.editReply({ embeds: [embed] });
+      }
       const managementCommands = new Set([
         'ticketpaneel',
         'rulepanel',

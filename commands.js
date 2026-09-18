@@ -91,6 +91,10 @@ const commandData = [
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('server-status')
+    .setDescription('View the private CORE. client staff server overview.')
+    .setDefaultMemberPermissions(0n),
+  new SlashCommandBuilder()
     .setName('set-log-channel')
     .setDescription('Choose where general bot activity is saved.')
     .addChannelOption((option) => option
