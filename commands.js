@@ -6,6 +6,10 @@ const commandData = [
     .setDescription('Post the ticket panel in this channel.')
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('rulepanel')
+    .setDescription('Post the community rules panel in this channel.')
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
     .setName('set-ticket-category')
     .setDescription('Choose where new tickets are created.')
     .addChannelOption((option) => option

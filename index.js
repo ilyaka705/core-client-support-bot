@@ -204,6 +204,36 @@ function ticketPanelEmbed() {
     .setFooter({ text: 'Private support  •  CORE. client' });
 }
 
+function rulesPanelEmbeds() {
+  const author = { name: 'CORE. client', iconURL: client.user.displayAvatarURL() };
+  return [
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('Community guidelines')
+      .setDescription('Welcome to **CORE. client**. Keep this space calm, welcoming, and safe for everyone. By participating here, you agree to follow these guidelines.')
+      .setThumbnail(client.user.displayAvatarURL())
+      .addFields(
+        { name: '01  Be respectful', value: 'Treat everyone with respect. Disagreement is fine; harassment, baiting, bullying, or targeted negativity is not.' },
+        { name: '02  Keep it appropriate', value: 'No hate speech, discrimination, sexual content, real-world threats, or content intended to harm others.' },
+        { name: '03  No spam or advertising', value: 'Do not flood channels, repeatedly tag people, promote servers or products, or send suspicious links without staff approval.' },
+        { name: '04  Protect privacy', value: 'Never share personal information, private messages, images, or recordings of someone else without their permission.' },
+      )
+      .setFooter({ text: 'CORE. client  •  Community guidelines' }),
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('A good experience for everyone')
+      .addFields(
+        { name: '05  Use channels correctly', value: 'Keep conversations on topic and use the right channel for your message. Do not repeatedly join and leave voice channels.' },
+        { name: '06  Voice chat etiquette', value: 'Use a clear and respectful microphone. No earrape, disruptive soundboard spam, or deliberately disturbing other members.' },
+        { name: '07  Follow staff guidance', value: 'Staff decisions keep the community safe. If you have a concern, please open a private ticket instead of arguing in public.' },
+        { name: '08  Report problems safely', value: 'If you see scams, harassment, unsafe content, or a rule violation, report it to staff through a ticket.' },
+      )
+      .setFooter({ text: 'Thank you for helping us keep CORE. client safe.' }),
+  ];
+}
+
 const openRow = new ActionRowBuilder().addComponents(
   new ButtonBuilder().setCustomId('ticket_open').setLabel('Create ticket').setStyle(ButtonStyle.Primary),
 );
@@ -503,6 +533,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       const managementCommands = new Set([
         'ticketpaneel',
+        'rulepanel',
         'set-ticket-category',
         'set-tiktok-feed',
         'remove-tiktok-feed',
@@ -518,6 +549,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.commandName === 'ticketpaneel') {
         await interaction.channel.send({ embeds: [ticketPanelEmbed()], components: [openRow] });
         await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'rulepanel') {
+        await interaction.channel.send({ embeds: rulesPanelEmbeds(), allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'set-ticket-category') {
         const category = interaction.options.getChannel('category');
