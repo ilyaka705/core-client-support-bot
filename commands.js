@@ -50,10 +50,19 @@ const commandData = [
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
     .setName('set-log-channel')
-    .setDescription('Choose where staff activity and ticket transcripts are saved.')
+    .setDescription('Choose where general bot activity is saved.')
     .addChannelOption((option) => option
       .setName('channel')
-      .setDescription('Private staff log channel (leave empty to disable)')
+      .setDescription('General log channel (leave empty to disable)')
+      .addChannelTypes(ChannelType.GuildText)
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('set-ticket-log-channel')
+    .setDescription('Choose where ticket activity and transcripts are saved.')
+    .addChannelOption((option) => option
+      .setName('channel')
+      .setDescription('Ticket log channel (leave empty to disable)')
       .addChannelTypes(ChannelType.GuildText)
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),

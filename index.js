@@ -48,6 +48,7 @@ settings.joinToCreateChannelIds ??= {};
 settings.temporaryVoiceChannels ??= {};
 settings.autoRoleIds ??= {};
 settings.logChannelIds ??= {};
+settings.ticketLogChannelIds ??= {};
 settings.rolePanels ??= {};
 
 const ticketTypes = {
@@ -61,8 +62,10 @@ function saveSettings() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 
-async function sendLog(guild, title, description, files = []) {
-  const channelId = settings.logChannelIds[guild.id];
+async function sendLog(guild, title, description, files = [], logType = 'general') {
+  const channelId = logType === 'ticket'
+    ? settings.ticketLogChannelIds[guild.id]
+    : settings.logChannelIds[guild.id];
   if (!channelId) return false;
   const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased()) return false;
@@ -271,6 +274,7 @@ async function closeTicket(interaction) {
     'Ticket closed',
     `Ticket: **${interaction.channel.name}**\nClosed by: **${interaction.user.username}**`,
     transcript ? [{ attachment: transcript, name: `${interaction.channel.name}-transcript.txt` }] : [],
+    'ticket',
   ).catch((error) => console.error('Ticket log:', error.message));
 
   await interaction.reply(transcriptSent ? 'This ticket will close in 5 seconds. A transcript has been sent by DM.' : 'This ticket will close in 5 seconds.');
@@ -396,6 +400,8 @@ async function createTicket(interaction, type) {
     interaction.guild,
     'New ticket',
     `Ticket: **${channel.name}**\nType: **${ticketTypes[type] || ticketTypes.general}**\nOpened by: **${interaction.user.username}**`,
+    [],
+    'ticket',
   ).catch((error) => console.error('Ticket log:', error.message));
   await interaction.editReply(`Your ticket has been opened: ${channel}`);
 }
@@ -503,6 +509,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-join-to-create',
         'set-auto-role',
         'set-log-channel',
+        'set-ticket-log-channel',
         'rolepanel',
       ]);
       if (managementCommands.has(interaction.commandName) && !canManageBot(interaction.member)) {
@@ -569,11 +576,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (channel) {
           settings.logChannelIds[interaction.guild.id] = channel.id;
           saveSettings();
-          await interaction.reply({ content: `Staff logs and ticket transcripts will now be saved in ${channel}.`, ephemeral: true });
+          await interaction.reply({ content: `General bot activity will now be saved in ${channel}.`, ephemeral: true });
         } else {
           delete settings.logChannelIds[interaction.guild.id];
           saveSettings();
-          await interaction.reply({ content: 'Staff logs and ticket transcripts have been disabled.', ephemeral: true });
+          await interaction.reply({ content: 'General bot activity logs have been disabled.', ephemeral: true });
+        }
+      }
+      if (interaction.commandName === 'set-ticket-log-channel') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          settings.ticketLogChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `Ticket activity and transcripts will now be saved in ${channel}.`, ephemeral: true });
+        } else {
+          delete settings.ticketLogChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Ticket activity logs and transcripts have been disabled.', ephemeral: true });
         }
       }
       if (interaction.commandName === 'rolepanel') {
@@ -604,7 +623,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         const claimedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
           .setFooter({ text: `Claimed by ${interaction.user.tag}` });
-        await sendLog(interaction.guild, 'Ticket claimed', `Ticket: **${interaction.channel.name}**\nClaimed by: **${interaction.user.username}**`).catch((error) => console.error('Ticket log:', error.message));
+        await sendLog(interaction.guild, 'Ticket claimed', `Ticket: **${interaction.channel.name}**\nClaimed by: **${interaction.user.username}**`, [], 'ticket').catch((error) => console.error('Ticket log:', error.message));
         return interaction.update({ embeds: [claimedEmbed], components: [ticketActions(interaction.user.username)] });
       }
       if (interaction.customId === 'ticket_open') {
