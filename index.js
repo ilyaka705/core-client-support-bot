@@ -430,6 +430,24 @@ async function updateStaffSuggestion(suggestion) {
   if (message) await message.edit({ embeds: [suggestionStaffEmbed(suggestion)], components: suggestionStaffActions(suggestion) });
 }
 
+async function deleteSuggestionArtifacts(suggestion) {
+  const messages = [
+    [suggestion.publicChannelId, suggestion.publicMessageId],
+    [suggestion.staffChannelId, suggestion.staffMessageId],
+  ];
+  for (const [channelId, messageId] of messages) {
+    if (!channelId || !messageId) continue;
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased()) continue;
+    const message = await channel.messages.fetch(messageId).catch(() => null);
+    if (message) await message.delete().catch(() => {});
+  }
+  if (suggestion.threadId) {
+    const thread = await client.channels.fetch(suggestion.threadId).catch(() => null);
+    if (thread?.delete) await thread.delete('Suggestion test data reset').catch(() => {});
+  }
+}
+
 async function sendSuggestionStatusDm(suggestion) {
   const user = await client.users.fetch(suggestion.authorId).catch(() => null);
   if (!user) return;
@@ -449,7 +467,7 @@ function suggestionSubmissionBlockReason(guildId, userId) {
   const activeCount = userSuggestions.filter((suggestion) => !suggestionIsFinal(suggestion)).length;
   if (activeCount >= 2) return 'You already have two active suggestions. Please wait for a team update before submitting another one.';
   const lastSubmittedAt = Math.max(0, ...userSuggestions.map((suggestion) => suggestion.createdAt || 0));
-  const cooldownMs = 6 * 60 * 60 * 1000;
+  const cooldownMs = 1 * 60 * 60 * 1000;
   if (lastSubmittedAt && Date.now() - lastSubmittedAt < cooldownMs) {
     const minutes = Math.ceil((cooldownMs - (Date.now() - lastSubmittedAt)) / 60000);
     return `Please wait **${minutes} minutes** before sending another suggestion.`;
@@ -926,6 +944,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-suggestion-channel',
         'set-suggestion-staff-channel',
         'set-suggestion-role',
+        'reset-suggestion-data',
         'set-ticket-category',
         'set-tiktok-feed',
         'remove-tiktok-feed',
@@ -1044,6 +1063,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
           saveSettings();
           await interaction.reply({ content: 'All members can now submit and vote on suggestions.', ephemeral: true });
         }
+      }
+      if (interaction.commandName === 'reset-suggestion-data') {
+        const member = interaction.options.getUser('member') || interaction.user;
+        const matchingSuggestions = Object.entries(settings.suggestions)
+          .filter(([, suggestion]) => suggestion.guildId === interaction.guild.id && suggestion.authorId === member.id);
+        if (!matchingSuggestions.length) {
+          return interaction.reply({ content: `No suggestion data was found for **${member.username}**.`, ephemeral: true });
+        }
+        await interaction.deferReply({ ephemeral: true });
+        for (const [suggestionId, suggestion] of matchingSuggestions) {
+          await deleteSuggestionArtifacts(suggestion);
+          delete settings.suggestions[suggestionId];
+        }
+        saveSettings();
+        await sendLog(
+          interaction.guild,
+          'Suggestion test data reset',
+          `Member: **${member.username}**\nRemoved: **${matchingSuggestions.length}** suggestion record(s)\nBy: **${interaction.user.username}**`,
+        ).catch(() => {});
+        return interaction.editReply(`Removed **${matchingSuggestions.length}** suggestion record(s) for **${member.username}**. Their suggestion cooldown has been cleared.`);
       }
       if (interaction.commandName === 'set-log-channel') {
         const channel = interaction.options.getChannel('channel');

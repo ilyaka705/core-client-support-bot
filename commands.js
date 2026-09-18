@@ -83,6 +83,14 @@ const commandData = [
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('reset-suggestion-data')
+    .setDescription('Remove a member’s suggestion data and test suggestion cards.')
+    .addUserOption((option) => option
+      .setName('member')
+      .setDescription('Member whose test suggestions should be removed (default: you)')
+      .setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
     .setName('set-log-channel')
     .setDescription('Choose where general bot activity is saved.')
     .addChannelOption((option) => option
