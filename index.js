@@ -23,11 +23,22 @@ const required = ['DISCORD_TOKEN'];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) throw new Error(`Missing .env values: ${missing.join(', ')}`);
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildVoiceStates] });
+const client = new Client({ intents: [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMembers,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildVoiceStates,
+] });
 const config = {
   categoryId: process.env.TICKET_CATEGORY_ID || null,
 };
-const settingsPath = process.env.SETTINGS_PATH || path.join(__dirname, 'ticket-settings.json');
+// Railway provides this path automatically when a persistent Volume is attached.
+// Locally, the bot continues to use ticket-settings.json in the project folder.
+const settingsPath = process.env.SETTINGS_PATH
+  || (process.env.RAILWAY_VOLUME_MOUNT_PATH
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'core-client-settings.json')
+    : path.join(__dirname, 'ticket-settings.json'));
 let settings = fs.existsSync(settingsPath) ? JSON.parse(fs.readFileSync(settingsPath, 'utf8')) : { supportRoleIds: {}, ticketCategoryIds: {}, welcomeChannelIds: {} };
 settings.supportRoleIds ??= {};
 settings.ticketCategoryIds ??= {};
