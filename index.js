@@ -74,11 +74,18 @@ async function createTicketTranscript(channel) {
     .sort((first, second) => first.createdTimestamp - second.createdTimestamp)
     .map((message) => {
       const attachments = [...message.attachments.values()].map((attachment) => attachment.url).join(' ');
-      const embeds = message.embeds.flatMap((embed) => [
-        embed.title,
-        embed.description,
-        ...embed.fields.map((field) => `${field.name}: ${field.value}`),
-      ].filter(Boolean));
+      // Ticket details are sent in Discord embeds. Save every readable part of
+      // those embeds, so the opening "New request" panel is never lost.
+      const embeds = message.embeds.flatMap((embed) => {
+        const parts = [
+          embed.author?.name,
+          embed.title ? `[${embed.title}]` : null,
+          embed.description,
+          ...embed.fields.map((field) => `${field.name}: ${field.value}`),
+          embed.footer?.text,
+        ].filter(Boolean);
+        return parts.length ? parts : [];
+      });
       const content = [message.content.trim(), ...embeds, attachments].filter(Boolean).join('\n');
       return content ? `[${new Date(message.createdTimestamp).toISOString()}] ${message.author.username}\n${content}\n` : null;
     })
