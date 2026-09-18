@@ -58,6 +58,9 @@ settings.polls ??= {};
 settings.applicationReviewChannelIds ??= {};
 settings.applications ??= {};
 
+const closingTicketChannels = new Set();
+const activeActionLocks = new Set();
+
 const ticketTypes = {
   general: 'General support',
   purchase: 'Purchase or billing',
@@ -67,6 +70,16 @@ const ticketTypes = {
 
 function saveSettings() {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+}
+
+function takeActionLock(key) {
+  if (activeActionLocks.has(key)) return false;
+  activeActionLocks.add(key);
+  return true;
+}
+
+function releaseActionLock(key) {
+  activeActionLocks.delete(key);
 }
 
 async function sendLog(guild, title, description, files = [], logType = 'general') {
@@ -321,6 +334,8 @@ function giveawayEmbed(giveaway) {
 function giveawayActions(ended = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('giveaway_enter').setLabel(ended ? 'Giveaway ended' : 'Enter Giveaway').setStyle(ButtonStyle.Primary).setDisabled(ended),
+    new ButtonBuilder().setCustomId('giveaway_leave').setLabel('Leave Giveaway').setStyle(ButtonStyle.Secondary).setDisabled(ended),
+    new ButtonBuilder().setCustomId('giveaway_end').setLabel('End Giveaway').setStyle(ButtonStyle.Danger).setDisabled(ended),
   );
 }
 
@@ -497,22 +512,39 @@ async function closeTicket(interaction) {
   if (interaction.user.id !== ownerId && !(await isSupport(interaction.member))) {
     return interaction.reply({ content: 'Only the ticket owner or the support team can close this ticket.', ephemeral: true });
   }
+  if (closingTicketChannels.has(interaction.channelId)) {
+    return interaction.reply({ content: 'This ticket is already closing.', ephemeral: true });
+  }
+  closingTicketChannels.add(interaction.channelId);
 
-  const transcript = await createTicketTranscript(interaction.channel).catch((error) => {
-    console.error('Ticket transcript:', error.message);
-    return null;
-  });
-  const transcriptSent = await sendTranscriptToTicketOwner(ownerId, interaction.channel.name, transcript).catch(() => false);
-  await sendLog(
-    interaction.guild,
-    'Ticket closed',
-    `Ticket: **${interaction.channel.name}**\nClosed by: **${interaction.user.username}**`,
-    transcript ? [{ attachment: transcript, name: `${interaction.channel.name}-transcript.txt` }] : [],
-    'ticket',
-  ).catch((error) => console.error('Ticket log:', error.message));
+  try {
+    const transcript = await createTicketTranscript(interaction.channel).catch((error) => {
+      console.error('Ticket transcript:', error.message);
+      return null;
+    });
+    const transcriptSent = await sendTranscriptToTicketOwner(ownerId, interaction.channel.name, transcript).catch(() => false);
+    await sendLog(
+      interaction.guild,
+      'Ticket closed',
+      `Ticket: **${interaction.channel.name}**\nClosed by: **${interaction.user.username}**`,
+      transcript ? [{ attachment: transcript, name: `${interaction.channel.name}-transcript.txt` }] : [],
+      'ticket',
+    ).catch((error) => console.error('Ticket log:', error.message));
 
-  await interaction.reply(transcriptSent ? 'This ticket will close in 5 seconds. A transcript has been sent by DM.' : 'This ticket will close in 5 seconds.');
-  setTimeout(() => interaction.channel.delete(`Ticket closed by ${interaction.user.tag}`).catch(console.error), 5000);
+    await interaction.reply(transcriptSent ? 'This ticket will close in 5 seconds. A transcript has been sent by DM.' : 'This ticket will close in 5 seconds.');
+    setTimeout(async () => {
+      try {
+        await interaction.channel.delete(`Ticket closed by ${interaction.user.tag}`);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        closingTicketChannels.delete(interaction.channelId);
+      }
+    }, 5000);
+  } catch (error) {
+    closingTicketChannels.delete(interaction.channelId);
+    throw error;
+  }
 }
 
 function ticketForm(type) {
@@ -591,17 +623,20 @@ function rolePanelMenu(roles) {
 
 async function createTicket(interaction, type) {
   await interaction.deferReply({ ephemeral: true });
-  const existing = interaction.guild.channels.cache.find(
-    (channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith(`ticket-owner:${interaction.user.id}`),
-  );
-  if (existing) return interaction.editReply(`You already have an open ticket: ${existing}`);
+  const lockKey = `ticket-create:${interaction.guild.id}:${interaction.user.id}`;
+  if (!takeActionLock(lockKey)) return interaction.editReply('A ticket is already being created for you.');
+  try {
+    const existing = interaction.guild.channels.cache.find(
+      (channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith(`ticket-owner:${interaction.user.id}`),
+    );
+    if (existing) return interaction.editReply(`You already have an open ticket: ${existing}`);
 
-  const supportRoleId = await ensureSupportRole(interaction.guild);
-  const categoryId = settings.ticketCategoryIds[interaction.guild.id] || config.categoryId;
-  const subject = interaction.fields.getTextInputValue('subject');
-  const description = interaction.fields.getTextInputValue('description');
-  const safeName = interaction.member.displayName.replace(/[\\/#:\r\n]/g, '').trim().slice(0, 80) || 'member';
-  const channel = await interaction.guild.channels.create({
+    const supportRoleId = await ensureSupportRole(interaction.guild);
+    const categoryId = settings.ticketCategoryIds[interaction.guild.id] || config.categoryId;
+    const subject = interaction.fields.getTextInputValue('subject');
+    const description = interaction.fields.getTextInputValue('description');
+    const safeName = interaction.member.displayName.replace(/[\\/#:\r\n]/g, '').trim().slice(0, 80) || 'member';
+    const channel = await interaction.guild.channels.create({
     name: `✦・${safeName}'s ticket`,
     type: ChannelType.GuildText,
     parent: categoryId || undefined,
@@ -614,7 +649,7 @@ async function createTicket(interaction, type) {
     ],
   });
 
-  await channel.send({
+    await channel.send({
     embeds: [new EmbedBuilder()
       .setColor(0xF5F5F7)
       .setTitle('New request')
@@ -630,14 +665,17 @@ async function createTicket(interaction, type) {
     components: [ticketActions()],
     allowedMentions: { parse: [] },
   });
-  await sendLog(
+    await sendLog(
     interaction.guild,
     'New ticket',
     `Ticket: **${channel.name}**\nType: **${ticketTypes[type] || ticketTypes.general}**\nOpened by: **${interaction.user.username}**`,
     [],
     'ticket',
-  ).catch((error) => console.error('Ticket log:', error.message));
-  await interaction.editReply(`Your ticket has been opened: ${channel}`);
+    ).catch((error) => console.error('Ticket log:', error.message));
+    await interaction.editReply(`Your ticket has been opened: ${channel}`);
+  } finally {
+    releaseActionLock(lockKey);
+  }
 }
 
 client.once(Events.ClientReady, async (readyClient) => {
@@ -767,6 +805,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
       }
       if (interaction.commandName === 'suggestionpanel') {
+        if (!settings.suggestionChannelIds[interaction.guild.id]) {
+          return interaction.reply({ content: 'Set a private suggestion review channel first with /set-suggestion-channel.', ephemeral: true });
+        }
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('suggestion_open').setLabel('Submit a Suggestion').setStyle(ButtonStyle.Primary),
         );
@@ -830,11 +871,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (channel) {
           settings.suggestionChannelIds[interaction.guild.id] = channel.id;
           saveSettings();
-          await interaction.reply({ content: `New suggestions will now be posted in ${channel}.`, ephemeral: true });
+          await interaction.reply({ content: `New suggestions will now be sent privately to ${channel}.`, ephemeral: true });
         } else {
           delete settings.suggestionChannelIds[interaction.guild.id];
           saveSettings();
-          await interaction.reply({ content: 'Suggestions will now be posted in the suggestion panel channel.', ephemeral: true });
+          await interaction.reply({ content: 'Suggestions have been disabled.', ephemeral: true });
         }
       }
       if (interaction.commandName === 'set-log-channel') {
@@ -905,6 +946,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           prize: interaction.options.getString('prize', true).trim().slice(0, 1000),
           endsAt: Date.now() + (interaction.options.getInteger('duration', true) * 60 * 1000),
           winnerCount: interaction.options.getInteger('winners') || 1,
+          hostId: interaction.user.id,
           hostName: interaction.user.username,
           entries: [],
           ended: false,
@@ -939,7 +981,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isButton()) {
-      if (interaction.customId === 'suggestion_open') return interaction.showModal(suggestionForm());
+      if (interaction.customId === 'suggestion_open') {
+        if (!settings.suggestionChannelIds[interaction.guild.id]) {
+          return interaction.reply({ content: 'Suggestions are not configured yet. Please contact staff.', ephemeral: true });
+        }
+        return interaction.showModal(suggestionForm());
+      }
       if (interaction.customId.startsWith('suggestion_status:')) {
         if (!canManageBot(interaction.member)) return interaction.reply({ content: 'You do not have permission to review suggestions.', ephemeral: true });
         const suggestion = settings.suggestions[interaction.message.id];
@@ -947,11 +994,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const status = interaction.customId.split(':')[1];
         if (!['review', 'accepted', 'declined'].includes(status)) return interaction.reply({ content: 'Unknown suggestion status.', ephemeral: true });
         if (['accepted', 'declined'].includes(suggestion.status)) return interaction.reply({ content: 'This suggestion has already received a final decision.', ephemeral: true });
-        suggestion.status = status;
-        suggestion.reviewedBy = interaction.user.username;
-        saveSettings();
-        await sendLog(interaction.guild, 'Suggestion reviewed', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
-        return interaction.update({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions(status)] });
+        if (suggestion.status === status) return interaction.reply({ content: `This suggestion is already **${suggestionStatusLabel(status)}**.`, ephemeral: true });
+        const lockKey = `suggestion:${interaction.message.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This suggestion is already being updated.', ephemeral: true });
+        try {
+          suggestion.status = status;
+          suggestion.reviewedBy = interaction.user.username;
+          saveSettings();
+          await sendLog(interaction.guild, 'Suggestion reviewed', `Suggestion: **${suggestion.title}**\nStatus: **${suggestionStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+          return interaction.update({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions(status)] });
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (interaction.customId === 'giveaway_enter') {
         const giveaway = settings.giveaways[interaction.message.id];
@@ -960,17 +1014,59 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
         }
         if (giveaway.entries.includes(interaction.user.id)) return interaction.reply({ content: 'You have already entered this giveaway.', ephemeral: true });
-        giveaway.entries.push(interaction.user.id);
-        saveSettings();
-        return interaction.update({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()] });
+        const lockKey = `giveaway:${interaction.message.id}:${interaction.user.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your giveaway entry is already being processed.', ephemeral: true });
+        try {
+          giveaway.entries.push(interaction.user.id);
+          saveSettings();
+          return interaction.update({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()] });
+        } finally {
+          releaseActionLock(lockKey);
+        }
+      }
+      if (interaction.customId === 'giveaway_leave') {
+        const giveaway = settings.giveaways[interaction.message.id];
+        if (!giveaway || giveaway.ended || giveaway.endsAt <= Date.now()) return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+        if (!giveaway.entries.includes(interaction.user.id)) return interaction.reply({ content: 'You have not entered this giveaway.', ephemeral: true });
+        const lockKey = `giveaway:${interaction.message.id}:${interaction.user.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your giveaway entry is already being updated.', ephemeral: true });
+        try {
+          giveaway.entries = giveaway.entries.filter((id) => id !== interaction.user.id);
+          saveSettings();
+          return interaction.update({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()] });
+        } finally {
+          releaseActionLock(lockKey);
+        }
+      }
+      if (interaction.customId === 'giveaway_end') {
+        const giveaway = settings.giveaways[interaction.message.id];
+        if (!giveaway || giveaway.ended) return interaction.reply({ content: 'This giveaway has already ended.', ephemeral: true });
+        if (interaction.user.id !== giveaway.hostId && !canManageBot(interaction.member)) {
+          return interaction.reply({ content: 'Only the giveaway host or staff can end this giveaway.', ephemeral: true });
+        }
+        const lockKey = `giveaway-end:${interaction.message.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This giveaway is already ending.', ephemeral: true });
+        try {
+          await interaction.deferUpdate();
+          await finishGiveaway(interaction.message.id, giveaway);
+          return;
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (interaction.customId.startsWith('poll_vote:')) {
         const poll = settings.polls[interaction.message.id];
         const index = Number(interaction.customId.split(':')[1]);
         if (!poll || !Number.isInteger(index) || !poll.options[index]) return interaction.reply({ content: 'This poll is no longer active.', ephemeral: true });
-        poll.votes[interaction.user.id] = index;
-        saveSettings();
-        return interaction.update({ embeds: [pollEmbed(poll)], components: [pollActions(poll)] });
+        const lockKey = `poll:${interaction.message.id}:${interaction.user.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your vote is already being updated.', ephemeral: true });
+        try {
+          poll.votes[interaction.user.id] = index;
+          saveSettings();
+          return interaction.update({ embeds: [pollEmbed(poll)], components: [pollActions(poll)] });
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (interaction.customId === 'application_open') {
         if (!settings.applicationReviewChannelIds[interaction.guild.id]) {
@@ -991,23 +1087,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: 'This application is no longer being tracked.', ephemeral: true });
         }
         if (['accepted', 'declined'].includes(application.status)) return interaction.reply({ content: 'This application has already received a final decision.', ephemeral: true });
-        application.status = status;
-        application.staffName = interaction.user.username;
-        saveSettings();
-        await interaction.update({ embeds: [applicationEmbed(application)], components: [applicationActions(status)] });
-        await sendLog(interaction.guild, 'Application reviewed', `Application: **${application.position}**\nStatus: **${applicationStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
-        if (['accepted', 'declined'].includes(status)) {
-          const applicant = await client.users.fetch(application.authorId).catch(() => null);
-          if (applicant) await applicant.send({
-            embeds: [new EmbedBuilder()
-              .setColor(0xF5F5F7)
-              .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
-              .setTitle('Application update')
-              .setDescription(`Your application for **${application.position}** has been **${status}**.`)
-              .setFooter({ text: 'CORE. client' })],
-          }).catch(() => {});
+        if (application.status === status) return interaction.reply({ content: `This application is already **${applicationStatusLabel(status)}**.`, ephemeral: true });
+        const lockKey = `application:${interaction.message.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This application is already being updated.', ephemeral: true });
+        try {
+          application.status = status;
+          application.staffName = interaction.user.username;
+          saveSettings();
+          await interaction.update({ embeds: [applicationEmbed(application)], components: [applicationActions(status)] });
+          await sendLog(interaction.guild, 'Application reviewed', `Application: **${application.position}**\nStatus: **${applicationStatusLabel(status)}**\nBy: **${interaction.user.username}**`).catch(() => {});
+          if (['accepted', 'declined'].includes(status)) {
+            const applicant = await client.users.fetch(application.authorId).catch(() => null);
+            if (applicant) await applicant.send({
+              embeds: [new EmbedBuilder()
+                .setColor(0xF5F5F7)
+                .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+                .setTitle('Application update')
+                .setDescription(`Your application for **${application.position}** has been **${status}**.`)
+                .setFooter({ text: 'CORE. client' })],
+            }).catch(() => {});
+          }
+          return;
+        } finally {
+          releaseActionLock(lockKey);
         }
-        return;
       }
       if (interaction.customId === 'ticket_close') return closeTicket(interaction);
       if (interaction.customId === 'ticket_claim') {
@@ -1017,10 +1120,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.message.embeds[0]?.footer?.text?.startsWith('Claimed by')) {
           return interaction.reply({ content: 'This ticket has already been claimed.', ephemeral: true });
         }
-        const claimedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-          .setFooter({ text: `Claimed by ${interaction.user.tag}` });
-        await sendLog(interaction.guild, 'Ticket claimed', `Ticket: **${interaction.channel.name}**\nClaimed by: **${interaction.user.username}**`, [], 'ticket').catch((error) => console.error('Ticket log:', error.message));
-        return interaction.update({ embeds: [claimedEmbed], components: [ticketActions(interaction.user.username)] });
+        const lockKey = `ticket-claim:${interaction.message.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This ticket is already being claimed.', ephemeral: true });
+        try {
+          const claimedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+            .setFooter({ text: `Claimed by ${interaction.user.tag}` });
+          await sendLog(interaction.guild, 'Ticket claimed', `Ticket: **${interaction.channel.name}**\nClaimed by: **${interaction.user.username}**`, [], 'ticket').catch((error) => console.error('Ticket log:', error.message));
+          return interaction.update({ embeds: [claimedEmbed], components: [ticketActions(interaction.user.username)] });
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (interaction.customId === 'ticket_open') {
         return interaction.reply({
@@ -1074,11 +1183,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (interaction.customId === 'voice_room_delete') {
         if (!isVoiceRoomOwner(interaction)) return interaction.reply({ content: 'Only the room owner can close this room.', ephemeral: true });
-        await interaction.reply({ content: 'This voice room will close in 3 seconds.', ephemeral: true });
-        await sendLog(interaction.guild, 'Voice room closed', `Room: **${interaction.channel.name}**\nClosed by: **${interaction.user.username}**`).catch((error) => console.error('Voice log:', error.message));
-        delete settings.temporaryVoiceChannels[interaction.channelId];
-        saveSettings();
-        return setTimeout(() => interaction.channel.delete('Temporary voice room closed by its owner').catch(console.error), 3000);
+        const lockKey = `voice-close:${interaction.channelId}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This voice room is already closing.', ephemeral: true });
+        try {
+          await interaction.reply({ content: 'This voice room will close in 3 seconds.', ephemeral: true });
+          await sendLog(interaction.guild, 'Voice room closed', `Room: **${interaction.channel.name}**\nClosed by: **${interaction.user.username}**`).catch((error) => console.error('Voice log:', error.message));
+          delete settings.temporaryVoiceChannels[interaction.channelId];
+          saveSettings();
+          setTimeout(async () => {
+            try {
+              await interaction.channel.delete('Temporary voice room closed by its owner');
+            } catch (error) {
+              console.error(error);
+            } finally {
+              releaseActionLock(lockKey);
+            }
+          }, 3000);
+          return;
+        } catch (error) {
+          releaseActionLock(lockKey);
+          throw error;
+        }
       }
       return;
     }
@@ -1152,52 +1277,64 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'suggestion_submit') {
-      const channelId = settings.suggestionChannelIds[interaction.guild.id] || interaction.channelId;
-      const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
-      if (!channel?.isTextBased()) return interaction.reply({ content: 'The suggestion channel is no longer available. Please contact staff.', ephemeral: true });
-      const suggestion = {
-        guildId: interaction.guild.id,
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        authorAvatar: interaction.user.displayAvatarURL(),
-        title: interaction.fields.getTextInputValue('title'),
-        details: interaction.fields.getTextInputValue('details'),
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-      const message = await channel.send({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions()], allowedMentions: { parse: [] } });
-      settings.suggestions[message.id] = suggestion;
-      saveSettings();
-      await sendLog(interaction.guild, 'Suggestion received', `Suggestion: **${suggestion.title}**\nFrom: **${interaction.user.username}**`).catch(() => {});
-      return interaction.reply({ content: 'Your suggestion has been sent to the team. Thank you!', ephemeral: true });
+      const lockKey = `suggestion-submit:${interaction.guild.id}:${interaction.user.id}`;
+      if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your suggestion is already being sent.', ephemeral: true });
+      try {
+        const channelId = settings.suggestionChannelIds[interaction.guild.id];
+        const channel = channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null;
+        if (!channel?.isTextBased()) return interaction.reply({ content: 'The suggestion channel is no longer available. Please contact staff.', ephemeral: true });
+        const suggestion = {
+          guildId: interaction.guild.id,
+          authorId: interaction.user.id,
+          authorName: interaction.user.username,
+          authorAvatar: interaction.user.displayAvatarURL(),
+          title: interaction.fields.getTextInputValue('title'),
+          details: interaction.fields.getTextInputValue('details'),
+          status: 'pending',
+          createdAt: Date.now(),
+        };
+        const message = await channel.send({ embeds: [suggestionEmbed(suggestion)], components: [suggestionActions()], allowedMentions: { parse: [] } });
+        settings.suggestions[message.id] = suggestion;
+        saveSettings();
+        await sendLog(interaction.guild, 'Suggestion received', `Suggestion: **${suggestion.title}**\nFrom: **${interaction.user.username}**`).catch(() => {});
+        return interaction.reply({ content: 'Your suggestion has been sent to the team. Thank you!', ephemeral: true });
+      } finally {
+        releaseActionLock(lockKey);
+      }
     }
 
     if (interaction.isModalSubmit() && interaction.customId === 'application_submit') {
-      const channelId = settings.applicationReviewChannelIds[interaction.guild.id];
-      const channel = channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null;
-      if (!channel?.isTextBased()) return interaction.reply({ content: 'Applications are not configured correctly. Please contact staff.', ephemeral: true });
-      const hasActiveApplication = Object.values(settings.applications).some((application) =>
-        application.guildId === interaction.guild.id
-        && application.authorId === interaction.user.id
-        && ['pending', 'claimed'].includes(application.status));
-      if (hasActiveApplication) return interaction.reply({ content: 'You already have an application under review.', ephemeral: true });
-      const application = {
-        guildId: interaction.guild.id,
-        authorId: interaction.user.id,
-        authorName: interaction.user.username,
-        authorAvatar: interaction.user.displayAvatarURL(),
-        position: interaction.fields.getTextInputValue('position'),
-        experience: interaction.fields.getTextInputValue('experience'),
-        availability: interaction.fields.getTextInputValue('availability'),
-        reason: interaction.fields.getTextInputValue('reason'),
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-      const message = await channel.send({ embeds: [applicationEmbed(application)], components: [applicationActions()], allowedMentions: { parse: [] } });
-      settings.applications[message.id] = application;
-      saveSettings();
-      await sendLog(interaction.guild, 'Application received', `Application: **${application.position}**\nFrom: **${interaction.user.username}**`).catch(() => {});
-      return interaction.reply({ content: 'Your application has been sent privately to the team. Thank you!', ephemeral: true });
+      const lockKey = `application-submit:${interaction.guild.id}:${interaction.user.id}`;
+      if (!takeActionLock(lockKey)) return interaction.reply({ content: 'Your application is already being sent.', ephemeral: true });
+      try {
+        const channelId = settings.applicationReviewChannelIds[interaction.guild.id];
+        const channel = channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null;
+        if (!channel?.isTextBased()) return interaction.reply({ content: 'Applications are not configured correctly. Please contact staff.', ephemeral: true });
+        const hasActiveApplication = Object.values(settings.applications).some((application) =>
+          application.guildId === interaction.guild.id
+          && application.authorId === interaction.user.id
+          && ['pending', 'claimed'].includes(application.status));
+        if (hasActiveApplication) return interaction.reply({ content: 'You already have an application under review.', ephemeral: true });
+        const application = {
+          guildId: interaction.guild.id,
+          authorId: interaction.user.id,
+          authorName: interaction.user.username,
+          authorAvatar: interaction.user.displayAvatarURL(),
+          position: interaction.fields.getTextInputValue('position'),
+          experience: interaction.fields.getTextInputValue('experience'),
+          availability: interaction.fields.getTextInputValue('availability'),
+          reason: interaction.fields.getTextInputValue('reason'),
+          status: 'pending',
+          createdAt: Date.now(),
+        };
+        const message = await channel.send({ embeds: [applicationEmbed(application)], components: [applicationActions()], allowedMentions: { parse: [] } });
+        settings.applications[message.id] = application;
+        saveSettings();
+        await sendLog(interaction.guild, 'Application received', `Application: **${application.position}**\nFrom: **${interaction.user.username}**`).catch(() => {});
+        return interaction.reply({ content: 'Your application has been sent privately to the team. Thank you!', ephemeral: true });
+      } finally {
+        releaseActionLock(lockKey);
+      }
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_create:')) {

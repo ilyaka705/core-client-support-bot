@@ -58,10 +58,10 @@ const commandData = [
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
     .setName('set-suggestion-channel')
-    .setDescription('Choose where member suggestions are posted.')
+    .setDescription('Choose the private staff channel where suggestions are reviewed.')
     .addChannelOption((option) => option
       .setName('channel')
-      .setDescription('Suggestion channel (leave empty to use the panel channel)')
+      .setDescription('Private staff channel (leave empty to disable suggestions)')
       .addChannelTypes(ChannelType.GuildText)
       .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
