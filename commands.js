@@ -66,6 +66,16 @@ const commandData = [
     .addRoleOption((option) => option.setName('role4').setDescription('Fourth role').setRequired(false))
     .addRoleOption((option) => option.setName('role5').setDescription('Fifth role').setRequired(false))
     .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Delete a number of recent messages from this channel.')
+    .addIntegerOption((option) => option
+      .setName('amount')
+      .setDescription('Number of messages to delete (1-100)')
+      .setMinValue(1)
+      .setMaxValue(100)
+      .setRequired(true))
+    .setDefaultMemberPermissions(0x2000n),
 ].map((command) => command.toJSON());
 
 module.exports = { commandData };

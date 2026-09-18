@@ -74,9 +74,15 @@ async function createTicketTranscript(channel) {
     .sort((first, second) => first.createdTimestamp - second.createdTimestamp)
     .map((message) => {
       const attachments = [...message.attachments.values()].map((attachment) => attachment.url).join(' ');
-      const content = message.content || message.embeds.map((embed) => embed.title || embed.description || '').join(' ') || '[No text]';
-      return `[${new Date(message.createdTimestamp).toISOString()}] ${message.author.username}: ${content}${attachments ? ` ${attachments}` : ''}`;
-    });
+      const embeds = message.embeds.flatMap((embed) => [
+        embed.title,
+        embed.description,
+        ...embed.fields.map((field) => `${field.name}: ${field.value}`),
+      ].filter(Boolean));
+      const content = [message.content.trim(), ...embeds, attachments].filter(Boolean).join('\n');
+      return content ? `[${new Date(message.createdTimestamp).toISOString()}] ${message.author.username}\n${content}\n` : null;
+    })
+    .filter(Boolean);
   return Buffer.from(`CORE. client ticket transcript\nChannel: ${channel.name}\n\n${lines.join('\n')}`, 'utf8');
 }
 
@@ -459,6 +465,18 @@ client.on(Events.GuildMemberAdd, async (member) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === 'clear') {
+        if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+          return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        }
+        if (typeof interaction.channel.bulkDelete !== 'function') {
+          return interaction.reply({ content: 'Messages cannot be cleared in this channel.', ephemeral: true });
+        }
+        const amount = interaction.options.getInteger('amount', true);
+        const deleted = await interaction.channel.bulkDelete(amount, true);
+        await sendLog(interaction.guild, 'Messages cleared', `Channel: **${interaction.channel.name}**\nDeleted: **${deleted.size}** messages\nBy: **${interaction.user.username}**`).catch((error) => console.error('Staff log:', error.message));
+        return interaction.reply({ content: `Cleared **${deleted.size}** messages. Messages older than 14 days cannot be removed by Discord.`, ephemeral: true });
+      }
       const managementCommands = new Set([
         'ticketpaneel',
         'set-ticket-category',
