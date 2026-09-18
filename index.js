@@ -229,9 +229,9 @@ async function createTicket(interaction) {
   const categoryId = settings.ticketCategoryIds[interaction.guild.id] || config.categoryId;
   const subject = interaction.fields.getTextInputValue('subject');
   const description = interaction.fields.getTextInputValue('description');
-  const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 70) || 'gebruiker';
+  const safeName = interaction.member.displayName.replace(/[\\/#:\r\n]/g, '').trim().slice(0, 80) || 'member';
   const channel = await interaction.guild.channels.create({
-    name: `ticket-${safeName}`,
+    name: `✦・${safeName}'s ticket`,
     type: ChannelType.GuildText,
     parent: categoryId || undefined,
     topic: `ticket-owner:${interaction.user.id}`,
