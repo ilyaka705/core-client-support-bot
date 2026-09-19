@@ -288,6 +288,18 @@ function announcementEmbed(title, message) {
     .setTimestamp();
 }
 
+function sneakPeekEmbed(title, message, imageUrl) {
+  const embed = new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setImage(imageUrl)
+    .setFooter({ text: 'CORE. client  •  Sneak peek' })
+    .setTimestamp();
+  if (title) embed.setTitle(title);
+  if (message) embed.setDescription(message);
+  return embed;
+}
+
 function suggestionStatusLabel(status) {
   return ({
     open: 'Open for voting',
@@ -700,6 +712,39 @@ function canManageBot(member) {
   return member.permissions.has(PermissionsBitField.Flags.ManageGuild);
 }
 
+function getCoreCommandName(interaction) {
+  if (interaction.commandName !== 'core') return interaction.commandName;
+  const group = interaction.options.getSubcommandGroup(false);
+  const subcommand = interaction.options.getSubcommand(false);
+  return {
+    'panels:tickets': 'ticketpaneel',
+    'panels:rules': 'rulepanel',
+    'panels:suggestions': 'suggestionpanel',
+    'panels:links': 'linkpanel',
+    'panels:applications': 'applicationpanel',
+    'panels:roles': 'rolepanel',
+    'posts:changelog': 'changelog',
+    'posts:announcement': 'announcement',
+    'posts:sneakpeek': 'sneakpeek',
+    'setup:ticket-category': 'set-ticket-category',
+    'setup:tiktok': 'set-tiktok-feed',
+    'setup:tiktok-off': 'remove-tiktok-feed',
+    'setup:voice': 'set-join-to-create',
+    'setup:auto-role': 'set-auto-role',
+    'setup:suggestions': 'set-suggestion-channel',
+    'setup:suggestion-staff': 'set-suggestion-staff-channel',
+    'setup:suggestion-role': 'set-suggestion-role',
+    'setup:logs': 'set-log-channel',
+    'setup:ticket-logs': 'set-ticket-log-channel',
+    'setup:applications': 'set-application-review-channel',
+    'manage:clear': 'clear',
+    'manage:giveaway': 'giveaway',
+    'manage:poll': 'poll',
+    'manage:reset-suggestions': 'reset-suggestion-data',
+    'manage:status': 'server-status',
+  }[`${group}:${subcommand}`];
+}
+
 async function closeTicket(interaction) {
   const ownerId = interaction.channel.topic?.match(/^ticket-owner:(\d+)/)?.[1];
   if (!ownerId) return interaction.reply({ content: 'This is not a ticket channel.', ephemeral: true });
@@ -957,7 +1002,9 @@ client.on(Events.GuildMemberAdd, async (member) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === 'clear') {
+      const commandName = getCoreCommandName(interaction);
+      if (!commandName) return interaction.reply({ content: 'This CORE. client command is not recognised.', ephemeral: true });
+      if (commandName === 'clear') {
         if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
           return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
         }
@@ -969,7 +1016,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await sendLog(interaction.guild, 'Messages cleared', `Channel: **${interaction.channel.name}**\nDeleted: **${deleted.size}** messages\nBy: **${interaction.user.username}**`).catch((error) => console.error('Staff log:', error.message));
         return interaction.reply({ content: `Cleared **${deleted.size}** messages. Messages older than 14 days cannot be removed by Discord.`, ephemeral: true });
       }
-      if (interaction.commandName === 'server-status') {
+      if (commandName === 'server-status') {
         if (!(await isSupport(interaction.member))) {
           return interaction.reply({ content: 'This private server overview is only available to staff.', ephemeral: true });
         }
@@ -1008,6 +1055,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'changelog',
         'linkpanel',
         'announcement',
+        'sneakpeek',
         'suggestionpanel',
         'set-suggestion-channel',
         'set-suggestion-staff-channel',
@@ -1026,18 +1074,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'giveaway',
         'poll',
       ]);
-      if (managementCommands.has(interaction.commandName) && !canManageBot(interaction.member)) {
+      if (managementCommands.has(commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
       }
-      if (interaction.commandName === 'ticketpaneel') {
+      if (commandName === 'ticketpaneel') {
         await interaction.channel.send({ embeds: [ticketPanelEmbed()], components: [openRow] });
         await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'rulepanel') {
+      if (commandName === 'rulepanel') {
         await interaction.channel.send({ embeds: rulesPanelEmbeds(), allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'changelog') {
+      if (commandName === 'changelog') {
         if (!interaction.channel?.isTextBased()) {
           return interaction.reply({ content: 'Changelogs can only be posted in a text channel.', ephemeral: true });
         }
@@ -1055,7 +1103,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         await interaction.reply({ content: 'Changelog posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'linkpanel') {
+      if (commandName === 'linkpanel') {
         if (!interaction.channel?.isTextBased()) {
           return interaction.reply({ content: 'Link panels can only be posted in a text channel.', ephemeral: true });
         }
@@ -1090,7 +1138,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.channel.send({ embeds: [linksPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Official links panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'announcement') {
+      if (commandName === 'announcement') {
         if (!interaction.channel?.isTextBased()) {
           return interaction.reply({ content: 'Announcements can only be posted in a text channel.', ephemeral: true });
         }
@@ -1107,14 +1155,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         await interaction.reply({ content: 'Announcement posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'suggestionpanel') {
+      if (commandName === 'sneakpeek') {
+        if (!interaction.channel?.isTextBased()) {
+          return interaction.reply({ content: 'Sneak peeks can only be posted in a text channel.', ephemeral: true });
+        }
+        const image = interaction.options.getAttachment('image', true);
+        const isImage = image.contentType?.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(image.name || '');
+        if (!isImage) {
+          return interaction.reply({ content: 'Please upload a PNG, JPG, GIF, or WEBP image.', ephemeral: true });
+        }
+        const title = (interaction.options.getString('title') || '').trim();
+        const message = (interaction.options.getString('message') || '').trim();
+        const notifyRole = interaction.options.getRole('notify_role');
+        await interaction.channel.send({
+          content: notifyRole ? `${notifyRole}` : undefined,
+          embeds: [sneakPeekEmbed(title, message, image.url)],
+          allowedMentions: { parse: [], roles: notifyRole ? [notifyRole.id] : [] },
+        });
+        await interaction.reply({ content: 'Sneak peek posted.', ephemeral: true });
+      }
+      if (commandName === 'suggestionpanel') {
         if (!settings.suggestionChannelIds[interaction.guild.id] || !settings.suggestionStaffChannelIds[interaction.guild.id]) {
           return interaction.reply({ content: 'Set both the public suggestion channel and private staff channel first.', ephemeral: true });
         }
         await interaction.channel.send({ embeds: [suggestionPanelEmbed()], components: [suggestionPanelActions()], allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Suggestion panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'set-ticket-category') {
+      if (commandName === 'set-ticket-category') {
         const category = interaction.options.getChannel('category');
         if (category) {
           settings.ticketCategoryIds[interaction.guild.id] = category.id;
@@ -1126,7 +1193,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Ticket category removed. New tickets will be created without a category.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-tiktok-feed') {
+      if (commandName === 'set-tiktok-feed') {
         const username = interaction.options.getString('username', true).replace(/^@/, '').trim();
         const channel = interaction.options.getChannel('channel', true);
         settings.tiktokFeeds[interaction.guild.id] = { username, channelId: channel.id, lastVideoId: null };
@@ -1134,12 +1201,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ content: `TikTok feed saved. New videos from **@${username}** will be posted in ${channel}.`, ephemeral: true });
         await checkTikTokFeed(interaction.guild, settings.tiktokFeeds[interaction.guild.id]).catch(() => {});
       }
-      if (interaction.commandName === 'remove-tiktok-feed') {
+      if (commandName === 'remove-tiktok-feed') {
         delete settings.tiktokFeeds[interaction.guild.id];
         saveSettings();
         await interaction.reply({ content: 'Automatic TikTok posts have been disabled.', ephemeral: true });
       }
-      if (interaction.commandName === 'set-join-to-create') {
+      if (commandName === 'set-join-to-create') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.joinToCreateChannelIds[interaction.guild.id] = channel.id;
@@ -1151,7 +1218,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Join to Create has been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-auto-role') {
+      if (commandName === 'set-auto-role') {
         const role = interaction.options.getRole('role');
         if (role) {
           if (role.managed || role.position >= interaction.guild.members.me.roles.highest.position) {
@@ -1166,7 +1233,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Automatic role assignment has been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-suggestion-channel') {
+      if (commandName === 'set-suggestion-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.suggestionChannelIds[interaction.guild.id] = channel.id;
@@ -1178,7 +1245,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Suggestions have been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-suggestion-staff-channel') {
+      if (commandName === 'set-suggestion-staff-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.suggestionStaffChannelIds[interaction.guild.id] = channel.id;
@@ -1190,7 +1257,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Private suggestion reviews have been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-suggestion-role') {
+      if (commandName === 'set-suggestion-role') {
         const role = interaction.options.getRole('role');
         if (role) {
           settings.suggestionRoleIds[interaction.guild.id] = role.id;
@@ -1202,7 +1269,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'All members can now submit and vote on suggestions.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'reset-suggestion-data') {
+      if (commandName === 'reset-suggestion-data') {
         const member = interaction.options.getUser('member') || interaction.user;
         const matchingSuggestions = Object.entries(settings.suggestions)
           .filter(([, suggestion]) => suggestion.guildId === interaction.guild.id && suggestion.authorId === member.id);
@@ -1222,7 +1289,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         ).catch(() => {});
         return interaction.editReply(`Removed **${matchingSuggestions.length}** suggestion record(s) for **${member.username}**. Their suggestion cooldown has been cleared.`);
       }
-      if (interaction.commandName === 'set-log-channel') {
+      if (commandName === 'set-log-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.logChannelIds[interaction.guild.id] = channel.id;
@@ -1234,7 +1301,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'General bot activity logs have been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-ticket-log-channel') {
+      if (commandName === 'set-ticket-log-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.ticketLogChannelIds[interaction.guild.id] = channel.id;
@@ -1246,7 +1313,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Ticket activity logs and transcripts have been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'set-application-review-channel') {
+      if (commandName === 'set-application-review-channel') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
           settings.applicationReviewChannelIds[interaction.guild.id] = channel.id;
@@ -1258,7 +1325,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Applications have been disabled.', ephemeral: true });
         }
       }
-      if (interaction.commandName === 'applicationpanel') {
+      if (commandName === 'applicationpanel') {
         if (!settings.applicationReviewChannelIds[interaction.guild.id]) {
           return interaction.reply({ content: 'Set a private application review channel first with /set-application-review-channel.', ephemeral: true });
         }
@@ -1268,7 +1335,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.channel.send({ embeds: [applicationPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Application panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'rolepanel') {
+      if (commandName === 'rolepanel') {
         const roles = [...new Map(['role1', 'role2', 'role3', 'role4', 'role5']
           .map((name) => interaction.options.getRole(name))
           .filter(Boolean)
@@ -1282,8 +1349,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         saveSettings();
         await interaction.reply({ content: 'Role panel posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'giveaway') {
+      if (commandName === 'giveaway') {
         if (!interaction.channel?.isTextBased()) return interaction.reply({ content: 'Giveaways can only be posted in a text channel.', ephemeral: true });
+        const notifyRole = interaction.options.getRole('notify_role');
         const giveaway = {
           guildId: interaction.guild.id,
           channelId: interaction.channel.id,
@@ -1295,13 +1363,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
           entries: [],
           ended: false,
         };
-        const message = await interaction.channel.send({ embeds: [giveawayEmbed(giveaway)], components: [giveawayActions()], allowedMentions: { parse: [] } });
+        const message = await interaction.channel.send({
+          content: notifyRole ? `${notifyRole}` : undefined,
+          embeds: [giveawayEmbed(giveaway)],
+          components: [giveawayActions()],
+          allowedMentions: { parse: [], roles: notifyRole ? [notifyRole.id] : [] },
+        });
         settings.giveaways[message.id] = giveaway;
         saveSettings();
         await sendLog(interaction.guild, 'Giveaway started', `Prize: **${giveaway.prize}**\nHosted by: **${interaction.user.username}**`).catch(() => {});
         await interaction.reply({ content: 'Giveaway posted.', ephemeral: true });
       }
-      if (interaction.commandName === 'poll') {
+      if (commandName === 'poll') {
         if (!interaction.channel?.isTextBased()) return interaction.reply({ content: 'Polls can only be posted in a text channel.', ephemeral: true });
         const options = ['option1', 'option2', 'option3', 'option4', 'option5']
           .map((name) => interaction.options.getString(name))
