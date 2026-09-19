@@ -33,6 +33,9 @@ const coreCommand = new SlashCommandBuilder()
       .setName('applications')
       .setDescription('Post the private application panel.'))
     .addSubcommand((command) => command
+      .setName('commands')
+      .setDescription('Post the complete CORE. client command guide.'))
+    .addSubcommand((command) => command
       .setName('roles')
       .setDescription('Post a self-role panel.')
       .addRoleOption((option) => option.setName('role1').setDescription('First role').setRequired(true))

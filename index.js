@@ -261,6 +261,105 @@ function rulesPanelEmbeds() {
   ];
 }
 
+function commandGuideEmbeds() {
+  const author = { name: 'CORE. client', iconURL: client.user.displayAvatarURL() };
+  return [
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('CORE. client command guide')
+      .setDescription('All staff commands start with `/core`. Select a group first, then the action you need. Discord will show the required options after you choose a command.')
+      .addFields(
+        {
+          name: 'Panels',
+          value: [
+            '`/core panels tickets` — Post the private support ticket panel.',
+            '`/core panels rules` — Post the community rules.',
+            '`/core panels suggestions` — Post the suggestion panel.',
+            '`/core panels links` — Post one official links panel with buttons.',
+            '`/core panels applications` — Post the application panel.',
+            '`/core panels roles` — Post a self-role menu.',
+            '`/core panels commands` — Post this guide.',
+          ].join('\n'),
+        },
+        {
+          name: 'Posts',
+          value: [
+            '`/core posts changelog` — Post polished release notes and optionally notify a role.',
+            '`/core posts announcement` — Post a polished announcement and optionally notify a role.',
+            '`/core posts sneakpeek` — Post an image sneak peek with optional title, text, and role notification.',
+          ].join('\n'),
+        },
+      )
+      .setThumbnail(client.user.displayAvatarURL())
+      .setFooter({ text: 'CORE. client  •  Panels and posts' }),
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('Configuration')
+      .addFields(
+        {
+          name: 'Server and community',
+          value: [
+            '`/core setup ticket-category` — Choose the ticket category.',
+            '`/core setup voice` — Set the Join to Create voice channel.',
+            '`/core setup auto-role` — Set or remove the automatic member role.',
+            '`/core setup tiktok` — Start automatic TikTok posts.',
+            '`/core setup tiktok-off` — Stop automatic TikTok posts.',
+          ].join('\n'),
+        },
+        {
+          name: 'Suggestions and applications',
+          value: [
+            '`/core setup suggestions` — Set the public suggestion channel.',
+            '`/core setup suggestion-staff` — Set the private staff review channel.',
+            '`/core setup suggestion-role` — Limit suggestion access to one role.',
+            '`/core setup applications` — Set the private application review channel.',
+          ].join('\n'),
+        },
+        {
+          name: 'Logs and protection',
+          value: [
+            '`/core setup logs` — Set the general bot and moderation log channel.',
+            '`/core setup ticket-logs` — Set the ticket transcript log channel.',
+            '`/core setup anti-raid` — Configure protection against mass joins.',
+            '`/core setup anti-spam` — Configure protection against spam, mentions, and Discord invites.',
+          ].join('\n'),
+        },
+      )
+      .setFooter({ text: 'CORE. client  •  Setup' }),
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('Staff management')
+      .addFields(
+        {
+          name: 'Community tools',
+          value: [
+            '`/core manage giveaway` — Start a giveaway and optionally notify a role.',
+            '`/core manage poll` — Post a community poll.',
+            '`/core manage clear` — Remove recent messages from the current channel.',
+            '`/core manage reset-suggestions` — Clear a member’s test suggestion data.',
+            '`/core manage status` — View the private server overview.',
+          ].join('\n'),
+        },
+        {
+          name: 'Moderation',
+          value: [
+            '`/core manage warn` — Give a member a stored warning.',
+            '`/core manage warnings` — View a member’s warning history.',
+            '`/core manage clear-warnings` — Remove a member’s stored warnings.',
+            '`/core manage timeout` — Temporarily restrict a member.',
+            '`/core manage remove-timeout` — Remove a member’s timeout.',
+            '`/core manage kick` — Remove a member from the server.',
+            '`/core manage ban` — Ban a member from the server.',
+          ].join('\n'),
+        },
+      )
+      .setFooter({ text: 'CORE. client  •  Staff only' }),
+  ];
+}
+
 function changelogEmbed(version, title, changes) {
   return new EmbedBuilder()
     .setColor(0xF5F5F7)
@@ -727,6 +826,7 @@ function getCoreCommandName(interaction) {
     'panels:suggestions': 'suggestionpanel',
     'panels:links': 'linkpanel',
     'panels:applications': 'applicationpanel',
+    'panels:commands': 'commandguide',
     'panels:roles': 'rolepanel',
     'posts:changelog': 'changelog',
     'posts:announcement': 'announcement',
@@ -1233,6 +1333,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-anti-raid',
         'set-anti-spam',
         'applicationpanel',
+        'commandguide',
         'set-application-review-channel',
         'rolepanel',
         'giveaway',
@@ -1341,6 +1442,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (commandName === 'rulepanel') {
         await interaction.channel.send({ embeds: rulesPanelEmbeds(), allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
+      }
+      if (commandName === 'commandguide') {
+        if (!interaction.channel?.isTextBased()) {
+          return interaction.reply({ content: 'The command guide can only be posted in a text channel.', ephemeral: true });
+        }
+        await interaction.channel.send({ embeds: commandGuideEmbeds(), allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Command guide posted.', ephemeral: true });
       }
       if (commandName === 'changelog') {
         if (!interaction.channel?.isTextBased()) {
