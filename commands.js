@@ -107,6 +107,22 @@ const coreCommand = new SlashCommandBuilder()
       .setDescription('Choose where ticket activity and transcripts are saved.')
       .addChannelOption((option) => option.setName('channel').setDescription('Ticket log channel (leave empty to disable)').addChannelTypes(ChannelType.GuildText).setRequired(false)))
     .addSubcommand((command) => command
+      .setName('anti-raid')
+      .setDescription('Configure automatic protection against mass joins.')
+      .addBooleanOption((option) => option.setName('enabled').setDescription('Turn anti-raid on or off').setRequired(true))
+      .addIntegerOption((option) => option.setName('join_limit').setDescription('Joins allowed before protection starts (default: 6)').setMinValue(3).setMaxValue(30).setRequired(false))
+      .addIntegerOption((option) => option.setName('window_seconds').setDescription('Join detection window in seconds (default: 60)').setMinValue(10).setMaxValue(300).setRequired(false))
+      .addIntegerOption((option) => option.setName('timeout_minutes').setDescription('Automatic timeout length (default: 60)').setMinValue(1).setMaxValue(1440).setRequired(false)))
+    .addSubcommand((command) => command
+      .setName('anti-spam')
+      .setDescription('Configure automatic protection against spam and invites.')
+      .addBooleanOption((option) => option.setName('enabled').setDescription('Turn anti-spam on or off').setRequired(true))
+      .addIntegerOption((option) => option.setName('message_limit').setDescription('Messages allowed before protection starts (default: 6)').setMinValue(3).setMaxValue(20).setRequired(false))
+      .addIntegerOption((option) => option.setName('window_seconds').setDescription('Message detection window in seconds (default: 8)').setMinValue(3).setMaxValue(60).setRequired(false))
+      .addIntegerOption((option) => option.setName('mention_limit').setDescription('Mentions allowed in one message (default: 5)').setMinValue(3).setMaxValue(20).setRequired(false))
+      .addIntegerOption((option) => option.setName('timeout_minutes').setDescription('Automatic timeout length (default: 10)').setMinValue(1).setMaxValue(1440).setRequired(false))
+      .addBooleanOption((option) => option.setName('block_invites').setDescription('Block Discord invite links (default: on)').setRequired(false)))
+    .addSubcommand((command) => command
       .setName('applications')
       .setDescription('Choose the private channel where applications are reviewed.')
       .addChannelOption((option) => option.setName('channel').setDescription('Private staff channel (leave empty to disable applications)').addChannelTypes(ChannelType.GuildText).setRequired(false))))
@@ -137,6 +153,40 @@ const coreCommand = new SlashCommandBuilder()
       .setName('reset-suggestions')
       .setDescription('Remove a member’s suggestion data and test cards.')
       .addUserOption((option) => option.setName('member').setDescription('Member whose test suggestions should be removed (default: you)').setRequired(false)))
+    .addSubcommand((command) => command
+      .setName('warn')
+      .setDescription('Give a member a staff warning.')
+      .addUserOption((option) => option.setName('member').setDescription('Member to warn').setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for the warning').setMaxLength(1000).setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('warnings')
+      .setDescription('View a member’s warning history.')
+      .addUserOption((option) => option.setName('member').setDescription('Member whose warnings you want to view').setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('clear-warnings')
+      .setDescription('Remove all stored warnings for a member.')
+      .addUserOption((option) => option.setName('member').setDescription('Member whose warnings you want to clear').setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('timeout')
+      .setDescription('Temporarily restrict a member.')
+      .addUserOption((option) => option.setName('member').setDescription('Member to timeout').setRequired(true))
+      .addIntegerOption((option) => option.setName('duration').setDescription('Duration in minutes (up to 28 days)').setMinValue(1).setMaxValue(40320).setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for the timeout').setMaxLength(1000).setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('remove-timeout')
+      .setDescription('Remove a member’s timeout.')
+      .addUserOption((option) => option.setName('member').setDescription('Member whose timeout you want to remove').setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for removing the timeout').setMaxLength(1000).setRequired(false)))
+    .addSubcommand((command) => command
+      .setName('kick')
+      .setDescription('Remove a member from the server.')
+      .addUserOption((option) => option.setName('member').setDescription('Member to kick').setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for the kick').setMaxLength(1000).setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('ban')
+      .setDescription('Ban a member from the server.')
+      .addUserOption((option) => option.setName('member').setDescription('Member to ban').setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for the ban').setMaxLength(1000).setRequired(true)))
     .addSubcommand((command) => command
       .setName('status')
       .setDescription('View the private CORE. client staff server overview.')));

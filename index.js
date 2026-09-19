@@ -59,9 +59,14 @@ settings.giveaways ??= {};
 settings.polls ??= {};
 settings.applicationReviewChannelIds ??= {};
 settings.applications ??= {};
+settings.moderationWarnings ??= {};
+settings.antiRaid ??= {};
+settings.antiSpam ??= {};
 
 const closingTicketChannels = new Set();
 const activeActionLocks = new Set();
+const recentJoinTimestamps = new Map();
+const recentMessageTimestamps = new Map();
 
 const ticketTypes = {
   general: 'General support',
@@ -736,13 +741,163 @@ function getCoreCommandName(interaction) {
     'setup:suggestion-role': 'set-suggestion-role',
     'setup:logs': 'set-log-channel',
     'setup:ticket-logs': 'set-ticket-log-channel',
+    'setup:anti-raid': 'set-anti-raid',
+    'setup:anti-spam': 'set-anti-spam',
     'setup:applications': 'set-application-review-channel',
     'manage:clear': 'clear',
     'manage:giveaway': 'giveaway',
     'manage:poll': 'poll',
     'manage:reset-suggestions': 'reset-suggestion-data',
+    'manage:warn': 'warn',
+    'manage:warnings': 'warnings',
+    'manage:clear-warnings': 'clear-warnings',
+    'manage:timeout': 'timeout',
+    'manage:remove-timeout': 'remove-timeout',
+    'manage:kick': 'kick',
+    'manage:ban': 'ban',
     'manage:status': 'server-status',
   }[`${group}:${subcommand}`];
+}
+
+function isStaffMember(member) {
+  const supportRoleId = settings.supportRoleIds[member.guild.id];
+  return Boolean(supportRoleId && member.roles.cache.has(supportRoleId))
+    || member.roles.cache.some((role) => role.name === 'CORE. assistant')
+    || member.permissions.has(PermissionsBitField.Flags.ManageGuild)
+    || member.permissions.has(PermissionsBitField.Flags.ManageChannels)
+    || member.permissions.has(PermissionsBitField.Flags.ManageMessages)
+    || member.permissions.has(PermissionsBitField.Flags.KickMembers)
+    || member.permissions.has(PermissionsBitField.Flags.BanMembers);
+}
+
+function warningList(guildId, userId) {
+  settings.moderationWarnings[guildId] ??= {};
+  settings.moderationWarnings[guildId][userId] ??= [];
+  return settings.moderationWarnings[guildId][userId];
+}
+
+function formatMinutes(minutes) {
+  if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440} day(s)`;
+  if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60} hour(s)`;
+  return `${minutes} minute(s)`;
+}
+
+function moderationTargetBlockReason(interaction, target) {
+  if (!target) return 'That member could not be found in this server.';
+  if (target.id === interaction.user.id) return 'You cannot moderate yourself.';
+  if (target.id === client.user.id) return 'I cannot moderate myself.';
+  if (target.id === interaction.guild.ownerId) return 'The server owner cannot be moderated.';
+  const botMember = interaction.guild.members.me;
+  if (!botMember || target.roles.highest.position >= botMember.roles.highest.position) {
+    return 'Move my role above this member before taking moderation action.';
+  }
+  if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)
+    && target.roles.highest.position >= interaction.member.roles.highest.position) {
+    return 'You cannot moderate a member with an equal or higher role.';
+  }
+  return null;
+}
+
+async function sendModerationDm(member, title, description) {
+  await member.send({
+    embeds: [new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+      .setTitle(title)
+      .setDescription(description)
+      .setFooter({ text: `CORE. client  •  ${member.guild.name}` })
+      .setTimestamp()],
+  }).catch(() => {});
+}
+
+function antiRaidConfig(guildId) {
+  return {
+    enabled: false,
+    joinLimit: 6,
+    windowSeconds: 60,
+    timeoutMinutes: 60,
+    ...settings.antiRaid[guildId],
+  };
+}
+
+function antiSpamConfig(guildId) {
+  return {
+    enabled: false,
+    messageLimit: 6,
+    windowSeconds: 8,
+    mentionLimit: 5,
+    timeoutMinutes: 10,
+    blockInvites: true,
+    ...settings.antiSpam[guildId],
+  };
+}
+
+async function handleAntiRaidMemberJoin(member) {
+  const config = antiRaidConfig(member.guild.id);
+  if (!config.enabled || member.user.bot || isStaffMember(member)) return;
+  const now = Date.now();
+  const windowMs = config.windowSeconds * 1000;
+  const timestamps = (recentJoinTimestamps.get(member.guild.id) || []).filter((timestamp) => now - timestamp <= windowMs);
+  timestamps.push(now);
+  recentJoinTimestamps.set(member.guild.id, timestamps);
+  if (timestamps.length < config.joinLimit || !member.moderatable) return;
+
+  const reason = `Anti-raid: ${timestamps.length} joins in ${config.windowSeconds} seconds`;
+  const timeoutApplied = await member.timeout(config.timeoutMinutes * 60 * 1000, reason)
+    .then(() => true)
+    .catch(() => false);
+  await sendLog(
+    member.guild,
+    'Anti-raid action',
+    `Member: **${member.user.username}**\nDetected: **${timestamps.length} joins** in ${config.windowSeconds} seconds\nAction: **${timeoutApplied ? `Timed out for ${formatMinutes(config.timeoutMinutes)}` : 'Timeout could not be applied'}**`,
+  ).catch(() => {});
+}
+
+async function handleAntiSpamMessage(message) {
+  if (!message.inGuild() || message.author.bot || !message.member || isStaffMember(message.member)) return;
+  const config = antiSpamConfig(message.guild.id);
+  if (!config.enabled) return;
+
+  const now = Date.now();
+  const key = `${message.guild.id}:${message.author.id}:${message.channel.id}`;
+  const windowMs = config.windowSeconds * 1000;
+  const messages = (recentMessageTimestamps.get(key) || []).filter((entry) => now - entry.createdAt <= windowMs);
+  messages.push({ id: message.id, createdAt: now });
+  recentMessageTimestamps.set(key, messages);
+
+  const containsInvite = config.blockInvites && /(?:discord\.gg|discord(?:app)?\.com\/invite)\/[a-z0-9-]+/i.test(message.content);
+  const mentionCount = message.mentions.users.size + message.mentions.roles.size
+    + (message.mentions.everyone ? config.mentionLimit : 0);
+  const containsMentionSpam = mentionCount >= config.mentionLimit;
+  if (!containsInvite && !containsMentionSpam && messages.length < config.messageLimit) return;
+
+  const lockKey = `anti-spam:${key}`;
+  if (!takeActionLock(lockKey)) return;
+  try {
+    recentMessageTimestamps.set(key, []);
+    for (const entry of messages) {
+      const candidate = entry.id === message.id
+        ? message
+        : await message.channel.messages.fetch(entry.id).catch(() => null);
+      if (candidate?.deletable) await candidate.delete().catch(() => {});
+    }
+    const detection = containsInvite
+      ? 'Discord invite link'
+      : containsMentionSpam
+        ? `${mentionCount} mentions in one message`
+        : `${messages.length} messages in ${config.windowSeconds} seconds`;
+    const reason = `Anti-spam: ${detection}`;
+    const timeoutApplied = message.member.moderatable
+      ? await message.member.timeout(config.timeoutMinutes * 60 * 1000, reason).then(() => true).catch(() => false)
+      : false;
+    await sendLog(
+      message.guild,
+      'Anti-spam action',
+      `Member: **${message.author.username}**\nDetected: **${detection}**\nAction: **Deleted messages${timeoutApplied ? ` and timed out for ${formatMinutes(config.timeoutMinutes)}` : '; timeout could not be applied'}**`,
+    ).catch(() => {});
+  } finally {
+    releaseActionLock(lockKey);
+  }
 }
 
 async function closeTicket(interaction) {
@@ -990,13 +1145,20 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
+  await handleAntiRaidMemberJoin(member).catch((error) => console.error('Anti-raid:', error.message));
   const roleId = settings.autoRoleIds[member.guild.id];
-  if (!roleId) return;
-  const role = await member.guild.roles.fetch(roleId).catch(() => null);
-  if (!role) return;
-  await member.roles.add(role, 'Automatic role for new member').catch((error) =>
-    console.error(`Could not give auto role in ${member.guild.name}:`, error.message),
-  );
+  if (roleId) {
+    const role = await member.guild.roles.fetch(roleId).catch(() => null);
+    if (role) {
+      await member.roles.add(role, 'Automatic role for new member').catch((error) =>
+        console.error(`Could not give auto role in ${member.guild.name}:`, error.message),
+      );
+    }
+  }
+});
+
+client.on(Events.MessageCreate, (message) => {
+  handleAntiSpamMessage(message).catch((error) => console.error('Anti-spam:', error.message));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -1068,14 +1230,109 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-auto-role',
         'set-log-channel',
         'set-ticket-log-channel',
+        'set-anti-raid',
+        'set-anti-spam',
         'applicationpanel',
         'set-application-review-channel',
         'rolepanel',
         'giveaway',
         'poll',
+        'warn',
+        'warnings',
+        'clear-warnings',
+        'timeout',
+        'remove-timeout',
+        'kick',
+        'ban',
       ]);
       if (managementCommands.has(commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      }
+      if (commandName === 'warnings') {
+        const user = interaction.options.getUser('member', true);
+        const warnings = warningList(interaction.guild.id, user.id);
+        if (!warnings.length) {
+          return interaction.reply({ content: `**${user.username}** has no stored warnings.`, ephemeral: true });
+        }
+        const details = warnings.slice(-10).reverse().map((warning, index) =>
+          `**${warnings.length - index}.** <t:${Math.floor(warning.createdAt / 1000)}:f>\n${warning.reason}\n*By ${warning.moderatorName}*`,
+        ).join('\n\n').slice(0, 3800);
+        const embed = new EmbedBuilder()
+          .setColor(0xF5F5F7)
+          .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+          .setTitle(`Warning history  •  ${user.username}`)
+          .setDescription(details)
+          .setFooter({ text: `${warnings.length} stored warning(s)  •  Visible to staff only` })
+          .setTimestamp();
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      }
+      if (commandName === 'clear-warnings') {
+        const user = interaction.options.getUser('member', true);
+        const warnings = warningList(interaction.guild.id, user.id);
+        if (!warnings.length) {
+          return interaction.reply({ content: `**${user.username}** has no stored warnings.`, ephemeral: true });
+        }
+        const removed = warnings.length;
+        delete settings.moderationWarnings[interaction.guild.id][user.id];
+        saveSettings();
+        await sendLog(interaction.guild, 'Warnings cleared', `Member: **${user.username}**\nRemoved: **${removed}** warning(s)\nBy: **${interaction.user.username}**`).catch(() => {});
+        return interaction.reply({ content: `Removed **${removed}** warning(s) for **${user.username}**.`, ephemeral: true });
+      }
+      if (['warn', 'timeout', 'remove-timeout', 'kick', 'ban'].includes(commandName)) {
+        const user = interaction.options.getUser('member', true);
+        const target = await interaction.guild.members.fetch(user.id).catch(() => null);
+        const blockReason = moderationTargetBlockReason(interaction, target);
+        if (blockReason) return interaction.reply({ content: blockReason, ephemeral: true });
+
+        const lockKey = `moderation:${interaction.guild.id}:${commandName}:${user.id}`;
+        if (!takeActionLock(lockKey)) return interaction.reply({ content: 'This moderation action is already being processed.', ephemeral: true });
+        try {
+          const reason = (interaction.options.getString('reason') || 'No reason provided.').trim().slice(0, 1000);
+          const auditReason = `${reason} | By ${interaction.user.tag}`.slice(0, 512);
+          await interaction.deferReply({ ephemeral: true });
+
+          if (commandName === 'warn') {
+            const warnings = warningList(interaction.guild.id, user.id);
+            warnings.push({ reason, moderatorName: interaction.user.username, createdAt: Date.now() });
+            saveSettings();
+            await sendModerationDm(target, 'You received a warning', `You received a warning in **${interaction.guild.name}**.\n\n**Reason**\n${reason}`);
+            await sendLog(interaction.guild, 'Member warned', `Member: **${user.username}**\nReason: ${reason}\nBy: **${interaction.user.username}**`).catch(() => {});
+            return interaction.editReply(`Warning saved for **${user.username}**. They now have **${warnings.length}** warning(s).`);
+          }
+
+          if (commandName === 'timeout') {
+            const duration = interaction.options.getInteger('duration', true);
+            if (!target.moderatable) return interaction.editReply('I cannot timeout this member. Check my role position and permissions.');
+            await sendModerationDm(target, 'You have been timed out', `You have been timed out in **${interaction.guild.name}** for **${formatMinutes(duration)}**.\n\n**Reason**\n${reason}`);
+            await target.timeout(duration * 60 * 1000, auditReason);
+            await sendLog(interaction.guild, 'Member timed out', `Member: **${user.username}**\nDuration: **${formatMinutes(duration)}**\nReason: ${reason}\nBy: **${interaction.user.username}**`).catch(() => {});
+            return interaction.editReply(`Timed out **${user.username}** for **${formatMinutes(duration)}**.`);
+          }
+
+          if (commandName === 'remove-timeout') {
+            if (!target.moderatable) return interaction.editReply('I cannot change this member’s timeout. Check my role position and permissions.');
+            await target.timeout(null, auditReason);
+            await sendModerationDm(target, 'Your timeout was removed', `Your timeout in **${interaction.guild.name}** has been removed.\n\n**Reason**\n${reason}`);
+            await sendLog(interaction.guild, 'Timeout removed', `Member: **${user.username}**\nReason: ${reason}\nBy: **${interaction.user.username}**`).catch(() => {});
+            return interaction.editReply(`Removed the timeout for **${user.username}**.`);
+          }
+
+          if (commandName === 'kick') {
+            if (!target.kickable) return interaction.editReply('I cannot kick this member. Check my role position and permissions.');
+            await sendModerationDm(target, 'You were removed from the server', `You were removed from **${interaction.guild.name}**.\n\n**Reason**\n${reason}`);
+            await target.kick(auditReason);
+            await sendLog(interaction.guild, 'Member kicked', `Member: **${user.username}**\nReason: ${reason}\nBy: **${interaction.user.username}**`).catch(() => {});
+            return interaction.editReply(`Kicked **${user.username}**.`);
+          }
+
+          if (!target.bannable) return interaction.editReply('I cannot ban this member. Check my role position and permissions.');
+          await sendModerationDm(target, 'You were banned from the server', `You were banned from **${interaction.guild.name}**.\n\n**Reason**\n${reason}`);
+          await target.ban({ reason: auditReason, deleteMessageSeconds: 0 });
+          await sendLog(interaction.guild, 'Member banned', `Member: **${user.username}**\nReason: ${reason}\nBy: **${interaction.user.username}**`).catch(() => {});
+          return interaction.editReply(`Banned **${user.username}**.`);
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (commandName === 'ticketpaneel') {
         await interaction.channel.send({ embeds: [ticketPanelEmbed()], components: [openRow] });
@@ -1232,6 +1489,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
           saveSettings();
           await interaction.reply({ content: 'Automatic role assignment has been disabled.', ephemeral: true });
         }
+      }
+      if (commandName === 'set-anti-raid') {
+        const current = antiRaidConfig(interaction.guild.id);
+        const enabled = interaction.options.getBoolean('enabled', true);
+        const config = {
+          enabled,
+          joinLimit: interaction.options.getInteger('join_limit') ?? current.joinLimit,
+          windowSeconds: interaction.options.getInteger('window_seconds') ?? current.windowSeconds,
+          timeoutMinutes: interaction.options.getInteger('timeout_minutes') ?? current.timeoutMinutes,
+        };
+        settings.antiRaid[interaction.guild.id] = config;
+        saveSettings();
+        const status = enabled
+          ? `Anti-raid is on: **${config.joinLimit} joins** in **${config.windowSeconds} seconds** triggers a **${formatMinutes(config.timeoutMinutes)}** timeout.`
+          : 'Anti-raid protection has been disabled.';
+        await interaction.reply({ content: status, ephemeral: true });
+      }
+      if (commandName === 'set-anti-spam') {
+        const current = antiSpamConfig(interaction.guild.id);
+        const enabled = interaction.options.getBoolean('enabled', true);
+        const config = {
+          enabled,
+          messageLimit: interaction.options.getInteger('message_limit') ?? current.messageLimit,
+          windowSeconds: interaction.options.getInteger('window_seconds') ?? current.windowSeconds,
+          mentionLimit: interaction.options.getInteger('mention_limit') ?? current.mentionLimit,
+          timeoutMinutes: interaction.options.getInteger('timeout_minutes') ?? current.timeoutMinutes,
+          blockInvites: interaction.options.getBoolean('block_invites') ?? current.blockInvites,
+        };
+        settings.antiSpam[interaction.guild.id] = config;
+        saveSettings();
+        const status = enabled
+          ? `Anti-spam is on: **${config.messageLimit} messages** in **${config.windowSeconds} seconds** or **${config.mentionLimit} mentions** triggers a **${formatMinutes(config.timeoutMinutes)}** timeout. Discord invite blocking is **${config.blockInvites ? 'on' : 'off'}**.`
+          : 'Anti-spam protection has been disabled.';
+        await interaction.reply({ content: status, ephemeral: true });
       }
       if (commandName === 'set-suggestion-channel') {
         const channel = interaction.options.getChannel('channel');
