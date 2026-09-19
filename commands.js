@@ -27,6 +27,10 @@ const commandData = [
       .setDescription('Changes, fixes, and improvements')
       .setMaxLength(3900)
       .setRequired(true))
+    .addRoleOption((option) => option
+      .setName('notify_role')
+      .setDescription('Optional role to notify about this update')
+      .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
     .setName('linkpanel')
@@ -55,6 +59,10 @@ const commandData = [
       .setDescription('Announcement message')
       .setMaxLength(3900)
       .setRequired(true))
+    .addRoleOption((option) => option
+      .setName('notify_role')
+      .setDescription('Optional role to notify about this announcement')
+      .setRequired(false))
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
     .setName('suggestionpanel')

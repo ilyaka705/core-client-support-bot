@@ -1044,10 +1044,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const version = interaction.options.getString('version', true).trim();
         const title = interaction.options.getString('title', true).trim();
         const changes = interaction.options.getString('changes', true).trim();
+        const notifyRole = interaction.options.getRole('notify_role');
         if (!version || !title || !changes) {
           return interaction.reply({ content: 'Version, title, and changes cannot be empty.', ephemeral: true });
         }
-        await interaction.channel.send({ embeds: [changelogEmbed(version, title, changes)], allowedMentions: { parse: [] } });
+        await interaction.channel.send({
+          content: notifyRole ? `${notifyRole}` : undefined,
+          embeds: [changelogEmbed(version, title, changes)],
+          allowedMentions: { parse: [], roles: notifyRole ? [notifyRole.id] : [] },
+        });
         await interaction.reply({ content: 'Changelog posted.', ephemeral: true });
       }
       if (interaction.commandName === 'linkpanel') {
@@ -1091,10 +1096,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         const title = interaction.options.getString('title', true).trim();
         const message = interaction.options.getString('message', true).trim();
+        const notifyRole = interaction.options.getRole('notify_role');
         if (!title || !message) {
           return interaction.reply({ content: 'Title and message cannot be empty.', ephemeral: true });
         }
-        await interaction.channel.send({ embeds: [announcementEmbed(title, message)], allowedMentions: { parse: [] } });
+        await interaction.channel.send({
+          content: notifyRole ? `${notifyRole}` : undefined,
+          embeds: [announcementEmbed(title, message)],
+          allowedMentions: { parse: [], roles: notifyRole ? [notifyRole.id] : [] },
+        });
         await interaction.reply({ content: 'Announcement posted.', ephemeral: true });
       }
       if (interaction.commandName === 'suggestionpanel') {
