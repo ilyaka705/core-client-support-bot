@@ -10,6 +10,53 @@ const commandData = [
     .setDescription('Post the community rules panel in this channel.')
     .setDefaultMemberPermissions(0x20n),
   new SlashCommandBuilder()
+    .setName('changelog')
+    .setDescription('Post a polished changelog entry in this channel.')
+    .addStringOption((option) => option
+      .setName('version')
+      .setDescription('For example: v1.4.0')
+      .setMaxLength(40)
+      .setRequired(true))
+    .addStringOption((option) => option
+      .setName('title')
+      .setDescription('Short title for this update')
+      .setMaxLength(100)
+      .setRequired(true))
+    .addStringOption((option) => option
+      .setName('changes')
+      .setDescription('Changes, fixes, and improvements')
+      .setMaxLength(3900)
+      .setRequired(true))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('linkpanel')
+    .setDescription('Post one official links panel with up to five links.')
+    .addStringOption((option) => option.setName('link1_label').setDescription('First link name, for example Website').setMaxLength(60).setRequired(true))
+    .addStringOption((option) => option.setName('link1_url').setDescription('First full https:// link').setMaxLength(500).setRequired(true))
+    .addStringOption((option) => option.setName('link2_label').setDescription('Second link name').setMaxLength(60).setRequired(false))
+    .addStringOption((option) => option.setName('link2_url').setDescription('Second full https:// link').setMaxLength(500).setRequired(false))
+    .addStringOption((option) => option.setName('link3_label').setDescription('Third link name').setMaxLength(60).setRequired(false))
+    .addStringOption((option) => option.setName('link3_url').setDescription('Third full https:// link').setMaxLength(500).setRequired(false))
+    .addStringOption((option) => option.setName('link4_label').setDescription('Fourth link name').setMaxLength(60).setRequired(false))
+    .addStringOption((option) => option.setName('link4_url').setDescription('Fourth full https:// link').setMaxLength(500).setRequired(false))
+    .addStringOption((option) => option.setName('link5_label').setDescription('Fifth link name').setMaxLength(60).setRequired(false))
+    .addStringOption((option) => option.setName('link5_url').setDescription('Fifth full https:// link').setMaxLength(500).setRequired(false))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
+    .setName('announcement')
+    .setDescription('Post a polished announcement in this channel.')
+    .addStringOption((option) => option
+      .setName('title')
+      .setDescription('Announcement title')
+      .setMaxLength(100)
+      .setRequired(true))
+    .addStringOption((option) => option
+      .setName('message')
+      .setDescription('Announcement message')
+      .setMaxLength(3900)
+      .setRequired(true))
+    .setDefaultMemberPermissions(0x20n),
+  new SlashCommandBuilder()
     .setName('suggestionpanel')
     .setDescription('Post the suggestion panel in this channel.')
     .setDefaultMemberPermissions(0x20n),

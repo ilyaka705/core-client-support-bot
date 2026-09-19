@@ -256,6 +256,38 @@ function rulesPanelEmbeds() {
   ];
 }
 
+function changelogEmbed(version, title, changes) {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle(`Release notes  •  ${version}`)
+    .setDescription(`**${title}**\n\n${changes}`)
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'CORE. client  •  Changelog' })
+    .setTimestamp();
+}
+
+function linksPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle('Official links')
+    .setDescription('Everything CORE. client, in one place. Use the links below to stay connected.')
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'CORE. client  •  Stay connected' });
+}
+
+function announcementEmbed(title, message) {
+  return new EmbedBuilder()
+    .setColor(0xF5F5F7)
+    .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+    .setTitle(title)
+    .setDescription(message)
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: 'CORE. client  •  Announcement' })
+    .setTimestamp();
+}
+
 function suggestionStatusLabel(status) {
   return ({
     open: 'Open for voting',
@@ -973,6 +1005,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const managementCommands = new Set([
         'ticketpaneel',
         'rulepanel',
+        'changelog',
+        'linkpanel',
+        'announcement',
         'suggestionpanel',
         'set-suggestion-channel',
         'set-suggestion-staff-channel',
@@ -1001,6 +1036,66 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.commandName === 'rulepanel') {
         await interaction.channel.send({ embeds: rulesPanelEmbeds(), allowedMentions: { parse: [] } });
         await interaction.reply({ content: 'Rules panel posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'changelog') {
+        if (!interaction.channel?.isTextBased()) {
+          return interaction.reply({ content: 'Changelogs can only be posted in a text channel.', ephemeral: true });
+        }
+        const version = interaction.options.getString('version', true).trim();
+        const title = interaction.options.getString('title', true).trim();
+        const changes = interaction.options.getString('changes', true).trim();
+        if (!version || !title || !changes) {
+          return interaction.reply({ content: 'Version, title, and changes cannot be empty.', ephemeral: true });
+        }
+        await interaction.channel.send({ embeds: [changelogEmbed(version, title, changes)], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Changelog posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'linkpanel') {
+        if (!interaction.channel?.isTextBased()) {
+          return interaction.reply({ content: 'Link panels can only be posted in a text channel.', ephemeral: true });
+        }
+        const links = [];
+        for (let index = 1; index <= 5; index += 1) {
+          const label = (interaction.options.getString(`link${index}_label`) || '').trim();
+          const rawUrl = (interaction.options.getString(`link${index}_url`) || '').trim();
+          if (Boolean(label) !== Boolean(rawUrl)) {
+            return interaction.reply({ content: `Link ${index} needs both a name and a full https:// link.`, ephemeral: true });
+          }
+          if (!label) continue;
+          let url;
+          try {
+            url = new URL(rawUrl);
+          } catch {
+            return interaction.reply({ content: `Link ${index} does not contain a valid URL.`, ephemeral: true });
+          }
+          if (url.protocol !== 'https:') {
+            return interaction.reply({ content: `Link ${index} must start with https://.`, ephemeral: true });
+          }
+          links.push({ label, url: url.toString() });
+        }
+        if (!links.length) {
+          return interaction.reply({ content: 'Add at least one official link.', ephemeral: true });
+        }
+        const row = new ActionRowBuilder().addComponents(
+          links.map((link) => new ButtonBuilder()
+            .setLabel(link.label)
+            .setStyle(ButtonStyle.Link)
+            .setURL(link.url)),
+        );
+        await interaction.channel.send({ embeds: [linksPanelEmbed()], components: [row], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Official links panel posted.', ephemeral: true });
+      }
+      if (interaction.commandName === 'announcement') {
+        if (!interaction.channel?.isTextBased()) {
+          return interaction.reply({ content: 'Announcements can only be posted in a text channel.', ephemeral: true });
+        }
+        const title = interaction.options.getString('title', true).trim();
+        const message = interaction.options.getString('message', true).trim();
+        if (!title || !message) {
+          return interaction.reply({ content: 'Title and message cannot be empty.', ephemeral: true });
+        }
+        await interaction.channel.send({ embeds: [announcementEmbed(title, message)], allowedMentions: { parse: [] } });
+        await interaction.reply({ content: 'Announcement posted.', ephemeral: true });
       }
       if (interaction.commandName === 'suggestionpanel') {
         if (!settings.suggestionChannelIds[interaction.guild.id] || !settings.suggestionStaffChannelIds[interaction.guild.id]) {
