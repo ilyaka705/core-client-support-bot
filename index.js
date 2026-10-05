@@ -268,8 +268,25 @@ function commandGuideEmbeds() {
     new EmbedBuilder()
       .setColor(0xF5F5F7)
       .setAuthor(author)
-      .setTitle('CORE. client command guide')
-      .setDescription('All staff commands start with `/core`. Select a group first, then the action you need. Discord will show the required options after you choose a command.')
+      .setTitle('CORE. client  •  Command center')
+      .setDescription('Every staff command begins with `/core`. Choose a group, then choose the action you need. Discord will show the required options automatically.')
+      .addFields(
+        {
+          name: 'Quick start',
+          value: 'Use `/core panels commands` whenever you want to post a fresh copy of this guide. Commands marked **Staff only** require the **Manage Server** permission.',
+        },
+        {
+          name: 'Command groups',
+          value: '`/core panels` — Create member-facing panels.\n`/core posts` — Publish updates and media.\n`/core setup` — Save server settings.\n`/core manage` — Staff tools and moderation.',
+        },
+      )
+      .setThumbnail(client.user.displayAvatarURL())
+      .setFooter({ text: 'CORE. client  •  Start here' }),
+    new EmbedBuilder()
+      .setColor(0xF5F5F7)
+      .setAuthor(author)
+      .setTitle('Panels & posts')
+      .setDescription('Create polished, member-facing content in the current channel.')
       .addFields(
         {
           name: 'Panels',
@@ -292,26 +309,26 @@ function commandGuideEmbeds() {
           ].join('\n'),
         },
       )
-      .setThumbnail(client.user.displayAvatarURL())
       .setFooter({ text: 'CORE. client  •  Panels and posts' }),
     new EmbedBuilder()
       .setColor(0xF5F5F7)
       .setAuthor(author)
-      .setTitle('Configuration')
+      .setTitle('Server setup  •  Staff only')
+      .setDescription('These settings stay saved after the bot restarts.')
       .addFields(
         {
-          name: 'Server and community',
+          name: 'Tickets, voice & roles',
           value: [
             '`/core setup ticket-category` — Choose the ticket category.',
             '`/core setup voice` — Set the Join to Create voice channel.',
             '`/core setup auto-role` — Set or remove the automatic member role.',
-            '`/core setup tiktok` — Start automatic TikTok posts.',
-            '`/core setup tiktok-off` — Stop automatic TikTok posts.',
           ].join('\n'),
         },
         {
-          name: 'Suggestions and applications',
+          name: 'Community tools',
           value: [
+            '`/core setup tiktok` — Start automatic TikTok posts.',
+            '`/core setup tiktok-off` — Stop automatic TikTok posts.',
             '`/core setup suggestions` — Set the public suggestion channel.',
             '`/core setup suggestion-staff` — Set the private staff review channel.',
             '`/core setup suggestion-role` — Limit suggestion access to one role.',
@@ -319,7 +336,7 @@ function commandGuideEmbeds() {
           ].join('\n'),
         },
         {
-          name: 'Logs and protection',
+          name: 'Logs & protection',
           value: [
             '`/core setup logs` — Set the general bot and moderation log channel.',
             '`/core setup ticket-logs` — Set the ticket transcript log channel.',
@@ -333,7 +350,8 @@ function commandGuideEmbeds() {
     new EmbedBuilder()
       .setColor(0xF5F5F7)
       .setAuthor(author)
-      .setTitle('Staff management')
+      .setTitle('Staff management  •  Staff only')
+      .setDescription('Use these tools only when you are responsible for managing the server.')
       .addFields(
         {
           name: 'Community tools',
