@@ -62,6 +62,7 @@ settings.applications ??= {};
 settings.moderationWarnings ??= {};
 settings.antiRaid ??= {};
 settings.antiSpam ??= {};
+settings.honeypotChannelIds ??= {};
 
 const closingTicketChannels = new Set();
 const activeActionLocks = new Set();
@@ -324,6 +325,7 @@ function commandGuideEmbeds() {
             '`/core setup ticket-logs` — Set the ticket transcript log channel.',
             '`/core setup anti-raid` — Configure protection against mass joins.',
             '`/core setup anti-spam` — Configure protection against spam, mentions, and Discord invites.',
+            '`/core setup honeypot` — Set an unused channel that instantly bans non-staff members who post.',
           ].join('\n'),
         },
       )
@@ -843,6 +845,7 @@ function getCoreCommandName(interaction) {
     'setup:ticket-logs': 'set-ticket-log-channel',
     'setup:anti-raid': 'set-anti-raid',
     'setup:anti-spam': 'set-anti-spam',
+    'setup:honeypot': 'set-honeypot',
     'setup:applications': 'set-application-review-channel',
     'manage:clear': 'clear',
     'manage:giveaway': 'giveaway',
@@ -930,6 +933,42 @@ function antiSpamConfig(guildId) {
     blockInvites: true,
     ...settings.antiSpam[guildId],
   };
+}
+
+function compactMessagePreview(content) {
+  const withoutLinks = (content || '[No text]')
+    .replace(/(?:https?:\/\/|www\.)\S+/gi, '[link removed]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return withoutLinks.slice(0, 180) || '[No text]';
+}
+
+async function handleHoneypotMessage(message) {
+  if (!message.inGuild() || message.author.bot || !message.member || isStaffMember(message.member)) return false;
+  if (settings.honeypotChannelIds[message.guild.id] !== message.channel.id) return false;
+
+  const lockKey = `honeypot:${message.guild.id}:${message.author.id}`;
+  if (!takeActionLock(lockKey)) return true;
+  try {
+    const preview = compactMessagePreview(message.content);
+    const attachments = [...message.attachments.values()]
+      .map((attachment) => attachment.name || 'unnamed attachment')
+      .join(', ')
+      .slice(0, 300);
+    if (message.deletable) await message.delete().catch(() => {});
+    const reason = `Honeypot channel message in #${message.channel.name}`;
+    const banApplied = message.member.bannable
+      ? await message.member.ban({ reason, deleteMessageSeconds: 0 }).then(() => true).catch(() => false)
+      : false;
+    await sendLog(
+      message.guild,
+      'Honeypot action',
+      `Member: **${message.author.username}** (\`${message.author.id}\`)\nChannel: **#${message.channel.name}**\nReason: **A non-staff member posted in the honeypot channel.**\nAction: **${banApplied ? 'Message removed and member banned' : 'Message removed; ban could not be applied'}**\n\n**Safe message preview**\n${preview}${attachments ? `\n\nAttachments: ${attachments}` : ''}`,
+    ).catch(() => {});
+    return true;
+  } finally {
+    releaseActionLock(lockKey);
+  }
 }
 
 async function handleAntiRaidMemberJoin(member) {
@@ -1257,8 +1296,15 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 });
 
-client.on(Events.MessageCreate, (message) => {
-  handleAntiSpamMessage(message).catch((error) => console.error('Anti-spam:', error.message));
+client.on(Events.MessageCreate, async (message) => {
+  const handledByHoneypot = await handleHoneypotMessage(message)
+    .catch((error) => {
+      console.error('Honeypot:', error.message);
+      return false;
+    });
+  if (!handledByHoneypot) {
+    await handleAntiSpamMessage(message).catch((error) => console.error('Anti-spam:', error.message));
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -1332,6 +1378,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'set-ticket-log-channel',
         'set-anti-raid',
         'set-anti-spam',
+        'set-honeypot',
         'applicationpanel',
         'commandguide',
         'set-application-review-channel',
@@ -1631,6 +1678,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ? `Anti-spam is on: **${config.messageLimit} messages** in **${config.windowSeconds} seconds** or **${config.mentionLimit} mentions** triggers a **${formatMinutes(config.timeoutMinutes)}** timeout. Discord invite blocking is **${config.blockInvites ? 'on' : 'off'}**.`
           : 'Anti-spam protection has been disabled.';
         await interaction.reply({ content: status, ephemeral: true });
+      }
+      if (commandName === 'set-honeypot') {
+        const channel = interaction.options.getChannel('channel');
+        if (channel) {
+          await channel.send({
+            embeds: [new EmbedBuilder()
+              .setColor(0xF5F5F7)
+              .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+              .setTitle('Security notice')
+              .setDescription([
+                'This channel is reserved for security monitoring.',
+                '',
+                '**Do not send messages, files, links, or test messages here.**',
+                'Messages from non-staff members are automatically removed and may result in an immediate ban.',
+                '',
+                'If you need help, please use the appropriate support channel or open a ticket instead.',
+              ].join('\n'))
+              .setThumbnail(client.user.displayAvatarURL())
+              .setFooter({ text: 'CORE. client  •  Security monitoring' })],
+            allowedMentions: { parse: [] },
+          });
+          settings.honeypotChannelIds[interaction.guild.id] = channel.id;
+          saveSettings();
+          await interaction.reply({ content: `Honeypot protection is active in ${channel}. Any non-staff member who posts there will have their message removed and will be banned.`, ephemeral: true });
+        } else {
+          delete settings.honeypotChannelIds[interaction.guild.id];
+          saveSettings();
+          await interaction.reply({ content: 'Honeypot protection has been disabled.', ephemeral: true });
+        }
       }
       if (commandName === 'set-suggestion-channel') {
         const channel = interaction.options.getChannel('channel');

@@ -126,6 +126,10 @@ const coreCommand = new SlashCommandBuilder()
       .addIntegerOption((option) => option.setName('timeout_minutes').setDescription('Automatic timeout length (default: 10)').setMinValue(1).setMaxValue(1440).setRequired(false))
       .addBooleanOption((option) => option.setName('block_invites').setDescription('Block Discord invite links (default: on)').setRequired(false)))
     .addSubcommand((command) => command
+      .setName('honeypot')
+      .setDescription('Choose a channel that instantly bans non-staff members who post.')
+      .addChannelOption((option) => option.setName('channel').setDescription('Unused honeypot channel (leave empty to disable)').addChannelTypes(ChannelType.GuildText).setRequired(false)))
+    .addSubcommand((command) => command
       .setName('applications')
       .setDescription('Choose the private channel where applications are reviewed.')
       .addChannelOption((option) => option.setName('channel').setDescription('Private staff channel (leave empty to disable applications)').addChannelTypes(ChannelType.GuildText).setRequired(false))))
