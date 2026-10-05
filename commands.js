@@ -128,7 +128,8 @@ const coreCommand = new SlashCommandBuilder()
     .addSubcommand((command) => command
       .setName('honeypot')
       .setDescription('Choose a channel that instantly bans non-staff members who post.')
-      .addChannelOption((option) => option.setName('channel').setDescription('Unused honeypot channel (leave empty to disable)').addChannelTypes(ChannelType.GuildText).setRequired(false)))
+      .addChannelOption((option) => option.setName('channel').setDescription('Unused honeypot channel (leave empty to disable)').addChannelTypes(ChannelType.GuildText).setRequired(false))
+      .addIntegerOption((option) => option.setName('review_hours').setDescription('Recommended review delay after a ban (default: 24)').setMinValue(1).setMaxValue(168).setRequired(false)))
     .addSubcommand((command) => command
       .setName('applications')
       .setDescription('Choose the private channel where applications are reviewed.')
@@ -194,6 +195,14 @@ const coreCommand = new SlashCommandBuilder()
       .setDescription('Ban a member from the server.')
       .addUserOption((option) => option.setName('member').setDescription('Member to ban').setRequired(true))
       .addStringOption((option) => option.setName('reason').setDescription('Reason for the ban').setMaxLength(1000).setRequired(true)))
+    .addSubcommand((command) => command
+      .setName('honeypot-bans')
+      .setDescription('View pending bans made by the honeypot channel.'))
+    .addSubcommand((command) => command
+      .setName('unban-honeypot')
+      .setDescription('Lift a reviewed honeypot ban using its user ID.')
+      .addStringOption((option) => option.setName('user_id').setDescription('Discord user ID from the honeypot-ban overview').setMinLength(17).setMaxLength(20).setRequired(true))
+      .addStringOption((option) => option.setName('reason').setDescription('Reason for lifting this honeypot ban').setMaxLength(1000).setRequired(true)))
     .addSubcommand((command) => command
       .setName('status')
       .setDescription('View the private CORE. client staff server overview.')));

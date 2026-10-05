@@ -63,6 +63,8 @@ settings.moderationWarnings ??= {};
 settings.antiRaid ??= {};
 settings.antiSpam ??= {};
 settings.honeypotChannelIds ??= {};
+settings.honeypotReviewHours ??= {};
+settings.honeypotBans ??= {};
 
 const closingTicketChannels = new Set();
 const activeActionLocks = new Set();
@@ -342,7 +344,7 @@ function commandGuideEmbeds() {
             '`/core setup ticket-logs` — Set the ticket transcript log channel.',
             '`/core setup anti-raid` — Configure protection against mass joins.',
             '`/core setup anti-spam` — Configure protection against spam, mentions, and Discord invites.',
-            '`/core setup honeypot` — Set an unused channel that instantly bans non-staff members who post.',
+            '`/core setup honeypot` — Set an unused honeypot channel and its review delay.',
           ].join('\n'),
         },
       )
@@ -361,6 +363,8 @@ function commandGuideEmbeds() {
             '`/core manage clear` — Remove recent messages from the current channel.',
             '`/core manage reset-suggestions` — Clear a member’s test suggestion data.',
             '`/core manage status` — View the private server overview.',
+            '`/core manage honeypot-bans` — Review automatic honeypot bans.',
+            '`/core manage unban-honeypot` — Lift a reviewed honeypot ban using its user ID.',
           ].join('\n'),
         },
         {
@@ -876,6 +880,8 @@ function getCoreCommandName(interaction) {
     'manage:remove-timeout': 'remove-timeout',
     'manage:kick': 'kick',
     'manage:ban': 'ban',
+    'manage:honeypot-bans': 'honeypot-bans',
+    'manage:unban-honeypot': 'unban-honeypot',
     'manage:status': 'server-status',
   }[`${group}:${subcommand}`];
 }
@@ -961,6 +967,15 @@ function compactMessagePreview(content) {
   return withoutLinks.slice(0, 180) || '[No text]';
 }
 
+function honeypotBanList(guildId) {
+  settings.honeypotBans[guildId] ??= {};
+  return settings.honeypotBans[guildId];
+}
+
+function honeypotReviewHours(guildId) {
+  return settings.honeypotReviewHours[guildId] ?? 24;
+}
+
 async function handleHoneypotMessage(message) {
   if (!message.inGuild() || message.author.bot || !message.member || isStaffMember(message.member)) return false;
   if (settings.honeypotChannelIds[message.guild.id] !== message.channel.id) return false;
@@ -978,10 +993,23 @@ async function handleHoneypotMessage(message) {
     const banApplied = message.member.bannable
       ? await message.member.ban({ reason, deleteMessageSeconds: 0 }).then(() => true).catch(() => false)
       : false;
+    const reviewAfter = Date.now() + (honeypotReviewHours(message.guild.id) * 60 * 60 * 1000);
+    if (banApplied) {
+      honeypotBanList(message.guild.id)[message.author.id] = {
+        userId: message.author.id,
+        username: message.author.username,
+        channelName: message.channel.name,
+        messagePreview: preview,
+        bannedAt: Date.now(),
+        reviewAfter,
+        status: 'pending-review',
+      };
+      saveSettings();
+    }
     await sendLog(
       message.guild,
       'Honeypot action',
-      `Member: **${message.author.username}** (\`${message.author.id}\`)\nChannel: **#${message.channel.name}**\nReason: **A non-staff member posted in the honeypot channel.**\nAction: **${banApplied ? 'Message removed and member banned' : 'Message removed; ban could not be applied'}**\n\n**Safe message preview**\n${preview}${attachments ? `\n\nAttachments: ${attachments}` : ''}`,
+      `Member: **${message.author.username}** (\`${message.author.id}\`)\nChannel: **#${message.channel.name}**\nReason: **A non-staff member posted in the honeypot channel.**\nAction: **${banApplied ? 'Message removed and member banned' : 'Message removed; ban could not be applied'}**${banApplied ? `\nRecommended review: <t:${Math.floor(reviewAfter / 1000)}:F> (<t:${Math.floor(reviewAfter / 1000)}:R>)` : ''}\n\n**Safe message preview**\n${preview}${attachments ? `\n\nAttachments: ${attachments}` : ''}`,
     ).catch(() => {});
     return true;
   } finally {
@@ -1410,9 +1438,71 @@ client.on(Events.InteractionCreate, async (interaction) => {
         'remove-timeout',
         'kick',
         'ban',
+        'honeypot-bans',
+        'unban-honeypot',
       ]);
       if (managementCommands.has(commandName) && !canManageBot(interaction.member)) {
         return interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+      }
+      if (commandName === 'honeypot-bans') {
+        const pendingBans = Object.values(honeypotBanList(interaction.guild.id))
+          .filter((record) => record.status === 'pending-review')
+          .sort((first, second) => second.bannedAt - first.bannedAt);
+        if (!pendingBans.length) {
+          return interaction.reply({ content: 'There are no pending honeypot bans to review.', ephemeral: true });
+        }
+        const details = pendingBans.slice(0, 10).map((record, index) => {
+          const ready = Date.now() >= record.reviewAfter;
+          return [
+            `**${index + 1}. ${record.username}**  •  \`${record.userId}\``,
+            `Channel: #${record.channelName}  •  Banned: <t:${Math.floor(record.bannedAt / 1000)}:R>`,
+            `Review: ${ready ? '✅ Ready for staff review' : `⏳ <t:${Math.floor(record.reviewAfter / 1000)}:R>`}`,
+          ].join('\n');
+        }).join('\n\n');
+        const embed = new EmbedBuilder()
+          .setColor(0xF5F5F7)
+          .setAuthor({ name: 'CORE. client', iconURL: client.user.displayAvatarURL() })
+          .setTitle('Honeypot bans  •  Pending reviews')
+          .setDescription(`${details}\n\nUse \`/core manage unban-honeypot\` only after staff has checked the situation. The review time is a recommendation, not a safety guarantee.`.slice(0, 4096))
+          .setFooter({ text: `${pendingBans.length} pending honeypot ban(s)  •  Visible to staff only` })
+          .setTimestamp();
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      }
+      if (commandName === 'unban-honeypot') {
+        const userId = interaction.options.getString('user_id', true).trim();
+        const record = honeypotBanList(interaction.guild.id)[userId];
+        if (!record || record.status !== 'pending-review') {
+          return interaction.reply({ content: 'No pending honeypot ban was found for that user ID.', ephemeral: true });
+        }
+        if (Date.now() < record.reviewAfter) {
+          return interaction.reply({ content: `The recommended review moment is <t:${Math.floor(record.reviewAfter / 1000)}:F> (<t:${Math.floor(record.reviewAfter / 1000)}:R>). If this was a clear mistake, you can still unban the member manually in Discord.`, ephemeral: true });
+        }
+        const lockKey = `honeypot-unban:${interaction.guild.id}:${userId}`;
+        if (!takeActionLock(lockKey)) {
+          return interaction.reply({ content: 'This honeypot-ban review is already being processed.', ephemeral: true });
+        }
+        try {
+          const reason = interaction.options.getString('reason', true).trim().slice(0, 1000);
+          await interaction.deferReply({ ephemeral: true });
+          const activeBan = await interaction.guild.bans.fetch(userId).catch(() => null);
+          if (!activeBan) {
+            return interaction.editReply('This user is no longer banned. The honeypot-ban record has not been changed.');
+          }
+          await interaction.guild.members.unban(userId, `${reason} | Honeypot review by ${interaction.user.tag}`.slice(0, 512));
+          record.status = 'released';
+          record.releasedAt = Date.now();
+          record.releasedBy = interaction.user.id;
+          record.releaseReason = reason;
+          saveSettings();
+          await sendLog(
+            interaction.guild,
+            'Honeypot ban lifted',
+            `Member: **${record.username}** (\`${userId}\`)\nOriginal channel: **#${record.channelName}**\nReason: ${reason}\nReviewed by: **${interaction.user.username}**`,
+          ).catch(() => {});
+          return interaction.editReply(`Unbanned **${record.username}** after the honeypot review.`);
+        } finally {
+          releaseActionLock(lockKey);
+        }
       }
       if (commandName === 'warnings') {
         const user = interaction.options.getUser('member', true);
@@ -1700,6 +1790,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (commandName === 'set-honeypot') {
         const channel = interaction.options.getChannel('channel');
         if (channel) {
+          const reviewHours = interaction.options.getInteger('review_hours') ?? honeypotReviewHours(interaction.guild.id);
           await channel.send({
             embeds: [new EmbedBuilder()
               .setColor(0xF5F5F7)
@@ -1718,8 +1809,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             allowedMentions: { parse: [] },
           });
           settings.honeypotChannelIds[interaction.guild.id] = channel.id;
+          settings.honeypotReviewHours[interaction.guild.id] = reviewHours;
           saveSettings();
-          await interaction.reply({ content: `Honeypot protection is active in ${channel}. Any non-staff member who posts there will have their message removed and will be banned.`, ephemeral: true });
+          await interaction.reply({ content: `Honeypot protection is active in ${channel}. Any non-staff member who posts there will have their message removed and will be banned. Staff review will be recommended after **${reviewHours} hour(s)**.`, ephemeral: true });
         } else {
           delete settings.honeypotChannelIds[interaction.guild.id];
           saveSettings();
